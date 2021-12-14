@@ -1,0 +1,85 @@
+---
+
+- name: nomad group
+  ansible.builtin.group:
+    name: nomad
+    state: present
+    system: true
+
+- name: nomad user
+  ansible.builtin.user:
+    name: nomad
+    group: nomad
+    system: true
+
+- name: packages
+  package:
+    name: "{{ item }}"
+    state: present
+  with_items: "{{ nomad_packages }}"
+
+- name: create nomad directories
+  file:
+    owner: nomad
+    group: nomad
+    path: "{{ item }}"
+    state: directory
+    mode: 0750
+  with_items:
+    - "{{ nomad_dir }}"
+    - "{{ nomad_bin_dir }}"
+    - "{{ nomad_dir }}/data"
+    - "{{ nomad_dir }}/config"
+    - "{{ nomad_dir }}/tls"
+    - "{{ nomad_dir }}/tls/ca"
+
+- name: download nomad
+  get_url:
+    url: "{{ nomad_zip_url }}"
+    dest: "/tmp/{{ nomad_pkg }}"
+    checksum: "sha256:{{ nomad_checksum_file_url }}"
+  changed_when: false
+
+- name: extract nomad
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ nomad_pkg }}"
+    dest: "{{ nomad_bin_dir }}"
+    remote_src: yes
+  changed_when: false
+
+- name: chcon nomad binary
+  ansible.builtin.file:
+    path: "{{ nomad_bin_dir }}/nomad"
+    owner: nomad
+    group: nomad
+    mode: "0770"
+    setype: bin_t
+    seuser: system_u
+
+- name: create a nomad symbolic link
+  ansible.builtin.file:
+    src: "{{ nomad_bin_dir }}/nomad"
+    dest: /usr/local/bin/nomad
+    owner: nomad
+    group: nomad
+    mode: "0770"
+    setype: bin_t
+    seuser: system_u
+    state: link
+
+- name: copy run-nomad script
+  ansible.builtin.copy:
+    src: files/run-nomad
+    dest: "{{ nomad_bin_dir }}/run-nomad"
+    mode: "0770"
+    owner: nomad
+    group: nomad
+
+- name: create the nomad ferm conf files
+  template: src=templates/1010-nomad.conf.j2 dest=/etc/ferm/ferm.d/1010-nomad.conf owner=root group=root mode=0600
+
+- name: cleanup
+  file:
+    path: "/tmp/{{ nomad_pkg }}"
+    state: "absent"
+  changed_when: false
