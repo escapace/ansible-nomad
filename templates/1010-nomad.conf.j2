@@ -1,0 +1,21 @@
+@def $NOMAD_BIND = ($EC2_VPC_V4_CIDR $EC2_VPC_V6_CIDR);
+
+domain (ip ip6) table filter {
+  chain OUTPUT {
+    daddr (169.254.169.254 fd00:ec2::254) proto tcp mod owner uid-owner "nomad" ACCEPT;
+  }
+}
+
+domain ip6 table filter chain INPUT saddr @ipfilter($NOMAD_BIND) {
+  # The port used for internal RPC communication between agents and
+  # servers, and for inter-server traffic for the consensus algorithm
+  # (raft).
+  proto tcp dport 4647 ACCEPT;
+
+  # The port used for the gossip protocol for cluster membership. Both TCP
+  # and UDP should be routable between the server nodes on this port.
+  proto (tcp udp) dport 4648 ACCEPT;
+
+  # The port used to run the HTTP server
+  # proto tcp dport 4646 ACCEPT;
+}
