@@ -9,6 +9,7 @@ nomad_packages:
   - python3-libselinux
   - unzip
   - jq
+  - iptables
 
 nomad_architecture_map:
   amd64: amd64
@@ -22,3 +23,5 @@ nomad_architecture: "{{ nomad_architecture_map[ansible_architecture] }}"
 nomad_pkg: "nomad_{{ nomad_version }}_linux_{{nomad_architecture}}.zip"
 nomad_zip_url: "https://releases.hashicorp.com/nomad/{{ nomad_version }}/nomad_{{ nomad_version }}_linux_{{nomad_architecture}}.zip"
 nomad_checksum_file_url: "https://releases.hashicorp.com/nomad/{{ nomad_version }}/nomad_{{ nomad_version }}_SHA256SUMS"
+
+nomad_volume_device: "/dev/{{ storage_setup_volume_group_name }}/{{ nomad_volume_name }}"

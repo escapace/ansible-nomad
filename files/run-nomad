@@ -7,14 +7,17 @@ set -o pipefail
 
 umask 027
 
+SCRIPT_DIR=
+SCRIPT_NAME=
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_NAME="$(basename "$0")"
+
 readonly NOMAD_CONFIG_FILE="default.hcl"
-readonly SYSTEMD_CONFIG_PATH="/etc/systemd/system/nomad.service"
+readonly SYSTEMD_CONFIG_PATH="/usr/lib/systemd/system/nomad.service"
 
-readonly EC2_INSTANCE_METADATA_URL="http://169.254.169.254/latest/meta-data"
-readonly EC2_INSTANCE_DYNAMIC_DATA_URL="http://169.254.169.254/latest/dynamic"
-
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly SCRIPT_NAME="$(basename "$0")"
+set -o allexport
+source "/etc/sysconfig/ec2-environment"
+set +o allexport
 
 function print_usage {
   echo
@@ -39,9 +42,11 @@ function print_usage {
 
   echo -e "  --enable-consul-acl-token\t\tEnable encryption of Consul ACL token. Optional."
   echo -e "  --enable-gossip-encryption\t\tEnable encryption of gossip traffic between nodes. Optional. Must also specify --gossip-encryption-key."
-  echo -e "  --enable-rpc-encryption\t\tEnable encryption of RPC traffic between nodes. Optional."
+  echo -e "  --enable-tls-encryption\t\tEnable encryption of traffic between nodes. Optional."
   echo -e "  --secrets-bucket-name\t\tAWS S3 secrets bucket name."
-  echo -e "  --verify-server-hostname\tWhen passed in, enable server hostname verification as part of RPC encryption. Each server in Consul should get their own certificate that contains SERVERNAME.DATACENTERNAME.consul in the hostname or SAN. This prevents an authenticated agent from being converted into a server that streams all data, bypassing ACLs."
+  echo -e "  --verify-server-hostname\tWhen passed in, enable server hostname verification as part of RPC encryption."
+  echo -e "  --interface\tBind to interface. Optional."
+  echo -e "  --ipv6\tUse IPv6. Optional."
   echo
   echo "Example:"
   echo
@@ -123,32 +128,6 @@ function get_object_value {
     "s3://${secrets_bucket_name}/${source}" /dev/stdout || exit 1
 }
 
-function lookup_path_in_instance_metadata {
-  local readonly path="$1"
-  curl --silent --location "$EC2_INSTANCE_METADATA_URL/$path/"
-}
-
-function lookup_path_in_instance_dynamic_data {
-  local readonly path="$1"
-  curl --silent --location "$EC2_INSTANCE_DYNAMIC_DATA_URL/$path/"
-}
-
-function get_instance_ip_address {
-  lookup_path_in_instance_metadata "ipv6"
-}
-
-function get_instance_id {
-  lookup_path_in_instance_metadata "instance-id"
-}
-
-function get_instance_availability_zone {
-  lookup_path_in_instance_metadata "placement/availability-zone"
-}
-
-function get_instance_region {
-  lookup_path_in_instance_dynamic_data "instance-identity/document" | jq -r ".region"
-}
-
 function assert_is_installed {
   local readonly name="$1"
 
@@ -158,39 +137,107 @@ function assert_is_installed {
   fi
 }
 
+function address_type {
+  local -r ipv6="${1}"
+  local type
+
+  if [[ "$ipv6" == "true" ]]
+  then
+    type="ipv6"
+  else
+    type="ipv4"
+  fi
+
+  echo "${type}"
+}
+
+function get_nomad_address {
+  local -r server="${1}"
+  local -r ipv6="${2}"
+  local -r interface="${3}"
+
+  local type
+  local variable_reference
+
+  type="$(address_type "${ipv6}")"
+
+  # if [[ "${server}" == "false" && -v "EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_ADDRESS" ]]
+  # then
+  #   variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_ADDRESS"
+  # else
+  variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_ADDRESS"
+  # fi
+
+  echo "${!variable_reference}"
+}
+
+function get_vpc_cidr {
+  local -r ipv6="${1}"
+  local -r interface="${2}"
+
+  local type
+  local variable_reference
+
+  type="$(address_type "${ipv6}")"
+
+  variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_VPC_CIDR"
+
+  echo "${!variable_reference}"
+}
+
+function get_prefix_cidr {
+  local -r ipv6="${1}"
+  local -r interface="${2}"
+
+  local type
+  local variable_reference
+
+  type="$(address_type "${ipv6}")"
+
+  variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_CIDR"
+
+  echo "${!variable_reference}"
+}
+
 function generate_nomad_config {
   umask 027
 
-  local readonly server="$1"
-  local readonly client="$2"
-  local readonly num_servers="$3"
-  local readonly config_dir="$4"
-  local readonly user="$5"
+  local -r server="${1}"
+  local -r client="${2}"
+  local -r num_servers="${3}"
+  local -r config_dir="${4}"
+  local -r plugin_dir="${5}"
+  local -r user="${6}"
+  local -r enable_gossip_encryption="${7}"
+  local -r gossip_encryption_key="${8}"
+  local -r enable_consul_acl_token="${9}"
+  local -r consul_acl_token="${10}"
+  local -r enable_tls_encryption="${11}"
+  local -r ca_file_path="${12}"
+  local -r cert_file_path="${13}"
+  local -r key_file_path="${14}"
+  local -r consul_ca_file_path="${15}"
+  local -r consul_cert_file_path="${16}"
+  local -r consul_key_file_path="${17}"
+  local -r verify_server_hostname="${18}"
+  local -r verify_https_client="${19}"
+  local -r ipv6="${20}"
+  local -r interface="${21}"
 
-  local readonly enable_gossip_encryption="$6"
-  local readonly gossip_encryption_key="$7"
+  local -r config_path="$config_dir/$NOMAD_CONFIG_FILE"
 
-  local readonly enable_consul_acl_token="$8"
-  local readonly consul_acl_token="$9"
-
-  local readonly enable_rpc_encryption="$10"
-  local readonly ca_path="$11"
-  local readonly cert_file_path="$12"
-  local readonly key_file_path="$13"
-  local readonly verify_server_hostname="$14"
-
-  local readonly config_path="$config_dir/$NOMAD_CONFIG_FILE"
-
-  local instance_id=""
-  local instance_region=""
-  # local instance_availability_zone=""
-
-  instance_id=$(get_instance_id)
-  instance_region=$(get_instance_region)
-  availability_zone=$(get_instance_availability_zone)
+  local instance_id="${EC2_INSTANCE_ID}"
+  local instance_region="${EC2_INSTANCE_REGION}"
+  local availability_zone="${EC2_INSTANCE_AVAILABILITY_ZONE}"
+  local instance_type="${EC2_INSTANCE_TYPE}"
+  local consul_port="8500"
 
   local server_config=""
   local gossip_encryption_configuration=""
+
+  local address
+
+  address="$(get_nomad_address "${server}" "${ipv6}" "${interface}")"
 
   if [[ "$server" == "true" ]]; then
     if [[ "$enable_gossip_encryption" == "true" && -n "$gossip_encryption_key" ]]; then
@@ -203,6 +250,19 @@ server {
   enabled = true
   bootstrap_expect = $num_servers
   $gossip_encryption_configuration
+
+  default_scheduler_config {
+    scheduler_algorithm             = "spread"
+    memory_oversubscription_enabled = true
+    reject_job_registration         = false
+
+    preemption_config {
+      system_scheduler_enabled   = true
+      service_scheduler_enabled  = true
+      batch_scheduler_enabled    = false
+      sysbatch_scheduler_enabled = false
+    }
+  }
 }
 EOF
 )
@@ -213,7 +273,24 @@ EOF
     client_config=$(cat <<EOF
 client {
   enabled = true
+  network_interface = "${interface}"
+  node_class = "${instance_type}"
+  options = {
+    "fingerprint.network.disallow_link_local" = "true"
+  }
 }
+
+plugin "docker" {
+  config {
+    allow_privileged = true
+
+    volumes {
+      enabled      = true
+      selinuxlabel = "z"
+    }
+  }
+}
+
 EOF
 )
   fi
@@ -225,71 +302,157 @@ EOF
     consul_acl_token_configuration="token = \"$consul_acl_token\""
   fi
 
-  local rpc_encryption_configuration=""
-  if [[ "$enable_rpc_encryption" == "true" && -n "$ca_path" && -n "$cert_file_path" && -n "$key_file_path" ]]; then
-    log_info "Creating RPC encryption configuration"
-    rpc_encryption_configuration=$(cat <<EOF
+  local tls_encryption_configuration=""
+  if [[ "$enable_tls_encryption" == "true" && -n "$ca_file_path" && -n "$cert_file_path" && -n "$key_file_path" ]]; then
+    log_info "Creating TLS encryption configuration"
+    tls_encryption_configuration=$(cat <<EOF
 tls {
-  http = false
+  http = true
   rpc  = true
 
-  ca_file   = "$ca_path"
+  ca_file   = "$ca_file_path"
   cert_file = "$cert_file_path"
   key_file  = "$key_file_path"
 
   verify_server_hostname = $verify_server_hostname
-  verify_https_client    = true
+  verify_https_client    = $verify_https_client
 }
+EOF
+)
+  fi
+
+  local consul_tls_encryption_configuration=""
+
+  if [[ "$enable_tls_encryption" == "true" && -n "$consul_ca_file_path" && -n "$consul_cert_file_path" && -n "$consul_key_file_path" ]]; then
+    log_info "Creating Consul TLS encryption configuration"
+
+    consul_port="8501"
+
+    consul_tls_encryption_configuration=$(cat <<EOF
+
+  ssl        = true
+  verify_ssl = true
+  ca_file    = "$consul_ca_file_path"
+  cert_file  = "$consul_cert_file_path"
+  key_file   = "$consul_key_file_path"
 EOF
 )
   fi
 
   log_info "Creating default Nomad config file in $config_path"
   cat > "$config_path" <<EOF
+plugin_dir = "${plugin_dir}"
 datacenter = "$availability_zone"
 name       = "$instance_id"
 region     = "$instance_region"
 
 addresses {
-  http = "127.0.0.1"
-  rpc  = "{{ GetPublicInterfaces | include \"name\" \"eth0\" | include \"type\" \"IPv6\" | include \"flags\" \"forwardable|up\" | attr \"address\" }}"
-  serf = "{{ GetPublicInterfaces | include \"name\" \"eth0\" | include \"type\" \"IPv6\" | include \"flags\" \"forwardable|up\" | attr \"address\" }}" # non-default ports may be specified
+  http = "${address}"
+  rpc  = "${address}"
+  serf = "${address}"
 }
 
 advertise {
-  http = "127.0.0.1"
-  rpc  = "{{ GetPublicInterfaces | include \"name\" \"eth0\" | include \"type\" \"IPv6\" | include \"flags\" \"forwardable|up\" | attr \"address\" }}"
-  serf = "{{ GetPublicInterfaces | include \"name\" \"eth0\" | include \"type\" \"IPv6\" | include \"flags\" \"forwardable|up\" | attr \"address\" }}" # non-default ports may be specified
+  http = "${address}"
+  rpc  = "${address}"
+  serf = "${address}"
 }
 
 $client_config
 
 $server_config
 
-$rpc_encryption_configuration
+$tls_encryption_configuration
 
 consul {
-  address = "127.0.0.1:8500"
+  address = "127.0.0.1:${consul_port}"
+
   $consul_acl_token_configuration
+  $consul_tls_encryption_configuration
 }
 EOF
   chown "$user:$user" "$config_path"
 }
 
+function generate_ferm_config {
+  log_info "Writing ferm configuration"
+
+  local server="$1"
+  local ipv6="$2"
+  local interface="$3"
+
+  local template_path="/etc/ferm/ferm.d/1010-nomad.conf"
+
+  local address
+  local domain
+  local prefix_cidr=""
+  local vpc_cidr
+
+  if [[ "$ipv6" == "true"  ]]
+  then
+    domain="ip6"
+  else
+    domain="ip"
+  fi
+
+  address="$(get_nomad_address "${server}" "${ipv6}" "${interface}")"
+  vpc_cidr="$(get_vpc_cidr "${ipv6}" "${interface}")"
+
+  if [[ "$server" == "false"  ]]
+  then
+    prefix_cidr="$(get_prefix_cidr "${ipv6}" "${interface}")"
+  fi
+
+  local -r template=$(cat <<EOF
+domain (ip ip6) table filter {
+  chain OUTPUT {
+    daddr (169.254.169.254 fd00:ec2::254) proto tcp mod owner uid-owner "nomad" ACCEPT;
+  }
+}
+
+domain ({{ (ds "data").domain }}) table filter chain INPUT saddr {{ (ds "data").vpc_cidr }} daddr {{ (ds "data").address }} {
+  # The port used for internal RPC communication between agents and
+  # servers, and for inter-server traffic for the consensus algorithm
+  # (raft).
+  proto tcp dport 4647 ACCEPT;
+
+  # The port used for the gossip protocol for cluster membership. Both TCP
+  # and UDP should be routable between the server nodes on this port.
+  proto (tcp udp) dport 4648 ACCEPT;
+
+  # The port used to run the HTTP server
+  proto tcp dport 4646 ACCEPT;
+}
+
+{{ if bool ((ds "data").server) }}
+{{ else }}
+{{ end }}
+EOF
+)
+
+  echo "{ \"server\": ${server}, \"domain\": \"${domain}\", \"address\": \"${address}\", \"vpc_cidr\": \"${vpc_cidr}\", \"prefix_cidr\": \"${prefix_cidr}\" }" | jq '.' | gomplate \
+    -i "${template}" -d data=stdin:///data.json > "${template_path}"
+
+  chown root:root "${template_path}"
+  chmod 600 "${template_path}"
+}
+
 function generate_systemd_config {
   umask 022
 
-  local readonly systemd_config_path="$1"
-  local readonly nomad_config_dir="$2"
-  local readonly nomad_data_dir="$3"
-  local readonly nomad_bin_dir="$4"
-  local readonly nomad_sytemd_stdout="$5"
-  local readonly nomad_sytemd_stderr="$6"
-  local readonly nomad_user="$7"
-  local readonly use_sudo="$8"
+  local -r systemd_config_path="${1}"
+  local -r nomad_config_dir="${2}"
+  local -r nomad_data_dir="${3}"
+  local -r nomad_bin_dir="${4}"
+  local -r nomad_sytemd_stdout="${5}"
+  local -r nomad_sytemd_stderr="${6}"
+  local nomad_user="${7}"
+  local -r use_sudo="${8}"
+
   shift 8
-  local readonly environment=("$@")
-  local readonly config_path="$nomad_config_dir/$NOMAD_CONFIG_FILE"
+
+  local -r environment=("$@")
+  local -r config_path="$nomad_config_dir/$NOMAD_CONFIG_FILE"
 
   if [[ "$use_sudo" == "true" ]]; then
     log_info "The --use-sudo flag is set, so running Nomad as the root user"
@@ -302,10 +465,14 @@ function generate_systemd_config {
 [Unit]
 Description="HashiCorp Nomad"
 Documentation=https://www.nomadproject.io/
-Requires=network-online.target
-Requires=consul.service
+After=consul-online.target
+After=docker.service
+After=ferm.service
 After=network-online.target
-After=consul.service
+Wants=consul-online.target
+Wants=docker.service
+Wants=ferm.service
+Wants=network-online.target
 ConditionFileNotEmpty=$config_path
 
 EOF
@@ -318,8 +485,14 @@ Group=$nomad_user
 ExecStart=$nomad_bin_dir/nomad agent -config $nomad_config_dir -data-dir $nomad_data_dir
 ExecReload=/bin/kill --signal HUP \$MAINPID
 KillMode=process
-Restart=on-failure
+KillSignal=SIGINT
 LimitNOFILE=65536
+LimitNPROC=infinity
+OOMScoreAdjust=-1000
+Restart=on-failure
+RestartSec=2
+TasksMax=infinity
+
 $(split_by_lines "Environment=" "${environment[@]}")
 
 EOF
@@ -350,7 +523,7 @@ function start_nomad {
 
   sudo systemctl daemon-reload
   sudo systemctl enable nomad.service
-  sudo systemctl restart nomad.service
+  sudo systemctl restart ferm.service nomad.service
 }
 
 # Based on: http://unix.stackexchange.com/a/7732/215969
@@ -364,6 +537,7 @@ function run {
   local client="false"
   local num_servers=""
   local config_dir=""
+  local plugin_dir=""
   local data_dir=""
   local bin_dir=""
   local systemd_stdout=""
@@ -375,10 +549,14 @@ function run {
   local all_args=()
 
   local enable_gossip_encryption="false"
-  local enable_rpc_encryption="false"
+  local enable_tls_encryption="false"
   local secrets_bucket_name=""
   local verify_server_hostname="false"
+  local verify_https_client="false"
   local enable_consul_acl_token="false"
+
+  local ipv6="false"
+  local interface="eth0"
 
   while [[ $# > 0 ]]; do
     local key="$1"
@@ -397,6 +575,11 @@ function run {
       --config-dir)
         assert_not_empty "$key" "$2"
         config_dir="$2"
+        shift
+        ;;
+      --plugin-dir)
+        assert_not_empty "$key" "$2"
+        plugin_dir="$2"
         shift
         ;;
       --data-dir)
@@ -441,15 +624,26 @@ function run {
       --enable-consul-acl-token)
         enable_consul_acl_token="true"
         ;;
-      --enable-rpc-encryption)
-        enable_rpc_encryption="true"
+      --enable-tls-encryption)
+        enable_tls_encryption="true"
         ;;
       --verify-server-hostname)
         verify_server_hostname="true"
         ;;
+      --verify-https-client)
+        verify_https_client="true"
+        ;;
       --environment)
         assert_not_empty "$key" "$2"
         environment+=("$2")
+        shift
+        ;;
+      --ipv6)
+        ipv6="true"
+        ;;
+      --interface)
+        assert_not_empty "$key" "$2"
+        interface="$2"
         shift
         ;;
       --help)
@@ -466,12 +660,8 @@ function run {
     shift
   done
 
-  if [[ "$server" == "true" ]]; then
-    assert_not_empty "--num-servers" "$num_servers"
-  fi
-
-  if [[ "$server" == "false" && "$client" == "false" ]]; then
-    log_error "At least one of --server or --client must be set"
+  if [[ ("$server" == "true" && "$client" == "true") || ("$server" == "false" && "$client" == "false") ]]; then
+    log_error "Exactly one of --server or --client must be set."
     exit 1
   fi
 
@@ -487,9 +677,14 @@ function run {
   assert_is_installed "aws"
   assert_is_installed "curl"
   assert_is_installed "jq"
+  assert_is_installed "gomplate"
 
   if [[ -z "$config_dir" ]]; then
     config_dir=$(cd "$SCRIPT_DIR/../config" && pwd)
+  fi
+
+  if [[ -z "$plugin_dir" ]]; then
+    plugin_dir=$(cd "$SCRIPT_DIR/../plugins" && pwd)
   fi
 
   if [[ -z "$data_dir" ]]; then
@@ -506,9 +701,14 @@ function run {
     user=$(get_owner_of_path "$config_dir")
   fi
 
-  local ca_path=""
-  local cert_file_path=""
-  local key_file_path=""
+  local nomad_ca_file_path=""
+  local nomad_cert_file_path=""
+  local nomad_key_file_path=""
+
+  local consul_ca_file_path=""
+  local consul_cert_file_path=""
+  local consul_key_file_path=""
+
   local gossip_encryption_key=""
   local consul_acl_token=""
 
@@ -519,6 +719,8 @@ function run {
   else
     type="client"
   fi
+
+  local region="${EC2_INSTANCE_REGION}"
 
   if [[ "$skip_nomad_config" == "true" ]]; then
     log_info "The --skip-nomad-config flag is set, so will not generate a default Nomad config file."
@@ -535,26 +737,97 @@ function run {
       consul_acl_token="$(get_object_value "${secrets_bucket_name}" "${type}/nomad/acl-token-nomad-${type}.txt")"
     fi
 
-    if [[ "$enable_rpc_encryption" == "true" ]]; then
+    if [[ "$enable_tls_encryption" == "true" ]]; then
       local tls_path
       local tls_ca_path
 
       tls_path="$(cd "$SCRIPT_DIR/../tls" && pwd)"
       tls_ca_path="$(cd "$SCRIPT_DIR/../tls/ca" && pwd)"
 
-      ca_path="${tls_ca_path}/nomad-ca.pem"
-      cert_file_path="${tls_path}/nomad-${type}.pem"
-      key_file_path="${tls_path}/nomad-${type}-key.pem"
+      nomad_ca_file_path="${tls_ca_path}/nomad-agent-ca.pem"
+      nomad_cert_file_path="${tls_path}/${region}-${type}-nomad-0.pem"
+      nomad_key_file_path="${tls_path}/${region}-${type}-nomad-0-key.pem"
 
-      get_object "${secrets_bucket_name}" "${type}/nomad/nomad-ca.pem" "${ca_path}" "${user}"
-      get_object "${secrets_bucket_name}" "${type}/nomad/nomad-${type}.pem" "${cert_file_path}" "${user}"
-      get_object "${secrets_bucket_name}" "${type}/nomad/nomad-${type}-key.pem" "${key_file_path}" "${user}"
+      get_object "${secrets_bucket_name}" \
+        "${type}/nomad/nomad-agent-ca.pem" \
+        "${nomad_ca_file_path}" \
+        "${user}"
+
+      get_object "${secrets_bucket_name}" \
+        "${type}/nomad/${region}-${type}-nomad-0.pem" \
+        "${nomad_cert_file_path}" \
+        "${user}"
+
+      get_object "${secrets_bucket_name}" \
+        "${type}/nomad/${region}-${type}-nomad-0-key.pem" \
+        "${nomad_key_file_path}" \
+        "${user}"
+
+      # Consul TLS
+
+      consul_ca_file_path="${tls_ca_path}/consul-agent-ca.pem"
+      consul_cert_file_path="${tls_path}/${region}-client-consul-0.pem"
+      consul_key_file_path="${tls_path}/${region}-client-consul-0-key.pem"
+
+      get_object "${secrets_bucket_name}" \
+        "client/consul/consul-agent-ca.pem" \
+        "${consul_ca_file_path}" \
+        "${user}"
+
+      # if [[ "$server" == "true" ]]
+      # then
+      get_object "${secrets_bucket_name}" \
+        "client/consul/${region}-client-consul-0.pem" \
+        "${consul_cert_file_path}" \
+        "${user}"
+
+      get_object "${secrets_bucket_name}" \
+        "client/consul/${region}-client-consul-0-key.pem" \
+        "${consul_key_file_path}" \
+        "${user}"
+
     fi
 
-    generate_nomad_config "$server" "$client" "$num_servers" "$config_dir" "$user" "$enable_gossip_encryption" "$gossip_encryption_key" "$enable_consul_acl_token" "${consul_acl_token}" "$enable_rpc_encryption" "$ca_path" "$cert_file_path" "$key_file_path" "${verify_server_hostname}"
+    generate_nomad_config \
+      "$server" \
+      "$client" \
+      "$num_servers" \
+      "$config_dir" \
+      "$plugin_dir" \
+      "$user" \
+      "$enable_gossip_encryption" \
+      "$gossip_encryption_key" \
+      "$enable_consul_acl_token" \
+      "$consul_acl_token" \
+      "$enable_tls_encryption" \
+      "$nomad_ca_file_path" \
+      "$nomad_cert_file_path" \
+      "$nomad_key_file_path" \
+      "$consul_ca_file_path" \
+      "$consul_cert_file_path" \
+      "$consul_key_file_path" \
+      "$verify_server_hostname" \
+      "$verify_https_client" \
+      "$ipv6" \
+      "$interface"
   fi
 
-  generate_systemd_config "$SYSTEMD_CONFIG_PATH" "$config_dir" "$data_dir" "$bin_dir" "$systemd_stdout" "$systemd_stderr" "$user" "$use_sudo" "${environment[@]}"
+  generate_systemd_config \
+    "$SYSTEMD_CONFIG_PATH" \
+    "$config_dir" \
+    "$data_dir" \
+    "$bin_dir" \
+    "$systemd_stdout" \
+    "$systemd_stderr" \
+    "$user" \
+    "$use_sudo" \
+    "${environment[@]}"
+
+  generate_ferm_config \
+    "$server" \
+    "$ipv6" \
+    "$interface"
+
   start_nomad
 }
 

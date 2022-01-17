@@ -1,0 +1,13 @@
+[volume:nomad]
+group = {{ storage_setup_volume_group_name }}
+volume = {{ nomad_volume_name }}
+size = {{ nomad_volume_size }}
+
+[filesystem:nomad]
+dev = {{ nomad_volume_device }}
+fstype = {{ nomad_volume_fs_type }}
+mount = {{ nomad_volume_mount }}
+required_by = storage-setup.service nomad.service
+user = nomad
+group = nomad
+mode = 700
