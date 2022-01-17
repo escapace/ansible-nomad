@@ -1,0 +1,49 @@
+---
+
+- name: set br_netfilter module configuration
+  copy:
+    content: "br_netfilter"
+    dest: "/etc/modules-load.d/br_netfilter.conf"
+    mode: 0644
+    owner: root
+    group: root
+  tags:
+    - ferm-conf
+
+- name: enable systemd-modules-load.service
+  service:
+    name: systemd-modules-load
+    state: restarted
+    enabled: true
+  tags:
+    - ferm-conf
+
+- name: add the br_netfilter module
+  modprobe:
+    name: br_netfilter
+    state: present
+  tags:
+    - ferm-conf
+
+- name: set recommended kernel parameters
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+  with_items: "{{ nomad_client_tunables }}"
+  tags:
+    - ferm-conf
+
+- name: include escapace.cni role
+  include_role:
+    name: escapace.cni
+
+- name: copy nomad-network script
+  ansible.builtin.copy:
+    src: files/nomad-network
+    dest: "{{ nomad_bin_dir }}/nomad-network"
+    mode: 0755
+    owner: root
+    group: root
+  tags:
+    - nomad-network

@@ -1,0 +1,9 @@
+---
+- name: Converge
+  hosts: all
+  vars:
+    nomad_role_debug: true
+    kresd_role_debug: true
+    ferm_role_debug: true
+  roles:
+    - role: escapace.consul

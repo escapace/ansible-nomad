@@ -2,4 +2,7 @@
 
 - include_tasks: nomad.yml
   when: ansible_os_family == "RedHat"
-
+  tags:
+    - ferm-conf
+    - nomad-network
+    - run-nomad

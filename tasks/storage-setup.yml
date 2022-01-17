@@ -1,0 +1,29 @@
+---
+
+- name: import escapace.storage_setup role
+  import_role:
+    name: escapace.storage_setup
+
+- name: systemd drop-in for options
+  template:
+    src:  "nomad-service-storage-options.conf.j2"
+    dest: "/etc/systemd/system/nomad.service.d/020-storage-options.conf"
+    owner: root
+    group: root
+    mode: 0644
+
+- name: /opt/nomad/data directory
+  file:
+    path: /opt/nomad/data
+    state: directory
+    owner: nomad
+    group: nomad
+    mode: 0700
+
+- name: nomad storage configuration
+  template:
+    src: storage-setup-nomad.conf.j2
+    dest: /etc/filesystems.d/30-nomad.conf
+    owner: root
+    group: root
+    mode: 0644
