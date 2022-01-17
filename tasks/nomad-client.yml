@@ -33,6 +33,7 @@
   with_items: "{{ nomad_client_tunables }}"
   tags:
     - ferm-conf
+  when: not nomad_role_debug | bool
 
 - name: include escapace.cni role
   include_role:
