@@ -6,4 +6,4 @@
     kresd_role_debug: true
     ferm_role_debug: true
   roles:
-    - role: escapace.consul
+    - role: escapace.nomad
