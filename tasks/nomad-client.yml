@@ -13,7 +13,6 @@
 - name: enable systemd-modules-load.service
   service:
     name: systemd-modules-load
-    state: restarted
     enabled: true
   tags:
     - ferm-conf

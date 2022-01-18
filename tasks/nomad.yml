@@ -44,28 +44,46 @@
     - "{{ nomad_dir }}/tls/ca"
     - "{{ nomad_dir }}/plugins"
 
-- name: download nomad
-  get_url:
-    url: "{{ nomad_zip_url }}"
-    dest: "/tmp/{{ nomad_pkg }}"
-    checksum: "sha256:{{ nomad_checksum_file_url }}"
+- name: check nomad version
+  ansible.builtin.slurp:
+    src: "{{ nomad_dir }}/version"
+  register: nomad_current_vesion
   changed_when: false
+  ignore_errors: true
 
-- name: extract nomad
-  ansible.builtin.unarchive:
-    src: "/tmp/{{ nomad_pkg }}"
-    dest: "{{ nomad_bin_dir }}"
-    remote_src: true
-  changed_when: false
+- name: install nomad
+  when: nomad_current_vesion.failed or nomad_current_vesion['content'] | b64decode != nomad_archive
+  block:
+    - name: download nomad
+      get_url:
+        url: "{{ nomad_zip_url }}"
+        dest: "/tmp/{{ nomad_archive }}"
+        checksum: "sha256:{{ nomad_checksum_file_url }}"
+      changed_when: false
 
-- name: chcon nomad binary
-  ansible.builtin.file:
-    path: "{{ nomad_bin_dir }}/nomad"
-    owner: nomad
-    group: nomad
-    mode: 0755
-    setype: bin_t
-    seuser: system_u
+    - name: extract nomad
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ nomad_archive }}"
+        dest: "{{ nomad_bin_dir }}"
+        remote_src: true
+      changed_when: false
+
+    - name: chcon nomad binary
+      ansible.builtin.file:
+        path: "{{ nomad_bin_dir }}/nomad"
+        owner: nomad
+        group: nomad
+        mode: 0755
+        setype: bin_t
+        seuser: system_u
+
+    - name: write version
+      ansible.builtin.copy:
+        content: "{{ nomad_archive }}"
+        dest: "{{ nomad_dir }}/version"
+        owner: root
+        group: root
+        mode: '0644'
 
 - name: create a nomad symbolic link
   ansible.builtin.file:
@@ -96,7 +114,7 @@
 
 - name: cleanup
   file:
-    path: "/tmp/{{ nomad_pkg }}"
+    path: "/tmp/{{ nomad_archive }}"
     state: "absent"
   changed_when: false
 
