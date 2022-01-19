@@ -475,7 +475,7 @@ EOF
 
 
 function run {
-  local interface=""
+  local interface="eth0"
   local enable_metadata="false"
 
   while [[ $# > 0 ]]; do
@@ -508,11 +508,6 @@ function run {
   assert_is_installed "jq"
   assert_is_installed "gomplate"
   assert_is_installed "awk"
-
-  if [[ -z "${interface}" ]]
-  then
-    interface="eth0"
-  fi
 
   setup_environment "${interface}"
   write_cni_conf "${interface}"
