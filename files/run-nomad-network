@@ -14,7 +14,7 @@ readonly NOMAD_BRIDGE_NETWORK_SUBNET="172.26.64.0/20"
 
 function print_usage {
   echo
-  echo "Usage: nomad-network [OPTIONS]"
+  echo "Usage: run-nomad-network [OPTIONS]"
   echo
   echo "This script is used to configure nomad network(s) on an AWS server."
   echo
@@ -472,7 +472,6 @@ EOF
     ip link set nomad promisc on
   fi
 }
-
 
 function run {
   local interface="eth0"
