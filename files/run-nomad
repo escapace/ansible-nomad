@@ -108,11 +108,13 @@ function get_object {
   local -r target="$3"
   local -r user="$4"
 
-  log_info "Downloading ${source}"
+  local -r key="${EC2_INSTANCE_REGION}/${source}"
+
+  log_info "Downloading ${key}"
 
   aws s3api get-object \
     --bucket "${secrets_bucket_name}" \
-    --key "${source}" \
+    --key "${key}" \
     "${target}" > /dev/null || exit 1
 
   chown "${user}:${user}" "${target}"
@@ -122,10 +124,12 @@ function get_object_value {
   local -r secrets_bucket_name="$1"
   local -r source="$2"
 
-  log_info "Downloading ${source}"
+  local -r key="${EC2_INSTANCE_REGION}/${source}"
+
+  log_info "Downloading ${key}"
 
   aws s3 cp --quiet \
-    "s3://${secrets_bucket_name}/${source}" /dev/stdout || exit 1
+    "s3://${secrets_bucket_name}/${key}" /dev/stdout || exit 1
 }
 
 function assert_is_installed {
@@ -363,6 +367,14 @@ $client_config
 $server_config
 
 $tls_encryption_configuration
+
+telemetry {
+  publish_allocation_metrics = true
+  publish_node_metrics       = true
+  disable_hostname           = true
+  prometheus_metrics         = true
+  collection_interval        = "10s"
+}
 
 consul {
   address = "127.0.0.1:${consul_port}"
@@ -720,8 +732,6 @@ function run {
     type="client"
   fi
 
-  local region="${EC2_INSTANCE_REGION}"
-
   if [[ "$skip_nomad_config" == "true" ]]; then
     log_info "The --skip-nomad-config flag is set, so will not generate a default Nomad config file."
   else
@@ -729,12 +739,12 @@ function run {
 
     if [[ "$enable_gossip_encryption" == "true" ]]
     then
-      gossip_encryption_key="$(get_object_value "${secrets_bucket_name}" "${type}/nomad/gossip-encryption-key.txt")"
+      gossip_encryption_key="$(get_object_value "${secrets_bucket_name}" "${type}/nomad/nomad-gossip-encryption-key")"
     fi
 
     if [[ "$enable_consul_acl_token" == "true" ]]
     then
-      consul_acl_token="$(get_object_value "${secrets_bucket_name}" "${type}/nomad/acl-token-nomad-${type}.txt")"
+      consul_acl_token="$(get_object_value "${secrets_bucket_name}" "${type}/nomad/consul-acl-token-nomad-${type}")"
     fi
 
     if [[ "$enable_tls_encryption" == "true" ]]; then
@@ -744,48 +754,46 @@ function run {
       tls_path="$(cd "$SCRIPT_DIR/../tls" && pwd)"
       tls_ca_path="$(cd "$SCRIPT_DIR/../tls/ca" && pwd)"
 
-      nomad_ca_file_path="${tls_ca_path}/nomad-agent-ca.pem"
-      nomad_cert_file_path="${tls_path}/${region}-${type}-nomad-0.pem"
-      nomad_key_file_path="${tls_path}/${region}-${type}-nomad-0-key.pem"
+      nomad_ca_file_path="${tls_ca_path}/nomad-ca.pem"
+      nomad_cert_file_path="${tls_path}/nomad-${type}.pem"
+      nomad_key_file_path="${tls_path}/nomad-${type}-key.pem"
 
       get_object "${secrets_bucket_name}" \
-        "${type}/nomad/nomad-agent-ca.pem" \
+        "${type}/nomad/nomad-ca.pem" \
         "${nomad_ca_file_path}" \
         "${user}"
 
       get_object "${secrets_bucket_name}" \
-        "${type}/nomad/${region}-${type}-nomad-0.pem" \
+        "${type}/nomad/nomad-${type}.pem" \
         "${nomad_cert_file_path}" \
         "${user}"
 
       get_object "${secrets_bucket_name}" \
-        "${type}/nomad/${region}-${type}-nomad-0-key.pem" \
+        "${type}/nomad/nomad-${type}-key.pem" \
         "${nomad_key_file_path}" \
         "${user}"
 
       # Consul TLS
-
-      consul_ca_file_path="${tls_ca_path}/consul-agent-ca.pem"
-      consul_cert_file_path="${tls_path}/${region}-client-consul-0.pem"
-      consul_key_file_path="${tls_path}/${region}-client-consul-0-key.pem"
+      consul_ca_file_path="${tls_ca_path}/consul-ca.pem"
+      consul_cert_file_path="${tls_path}/consul-nomad.pem"
+      consul_key_file_path="${tls_path}/consul-nomad-key.pem"
 
       get_object "${secrets_bucket_name}" \
-        "client/consul/consul-agent-ca.pem" \
+        "${type}/nomad/consul-ca.pem" \
         "${consul_ca_file_path}" \
         "${user}"
 
       # if [[ "$server" == "true" ]]
       # then
       get_object "${secrets_bucket_name}" \
-        "client/consul/${region}-client-consul-0.pem" \
+        "${type}/nomad/consul-nomad.pem" \
         "${consul_cert_file_path}" \
         "${user}"
 
       get_object "${secrets_bucket_name}" \
-        "client/consul/${region}-client-consul-0-key.pem" \
+        "${type}/nomad/consul-nomad-key.pem" \
         "${consul_key_file_path}" \
         "${user}"
-
     fi
 
     generate_nomad_config \

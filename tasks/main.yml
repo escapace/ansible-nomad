@@ -4,5 +4,5 @@
   when: ansible_os_family == "RedHat"
   tags:
     - ferm-conf
-    - nomad-network
     - run-nomad
+    - run-nomad-network

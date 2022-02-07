@@ -1,5 +1,15 @@
 ---
 
+- name: install dependencies
+  package:
+    name: "{{ packages }}"
+  vars:
+    packages:
+      - curl
+      - unzip
+      - jq
+      - retry
+
 - name: nomad group
   ansible.builtin.group:
     name: nomad
@@ -124,5 +134,5 @@
 - include_tasks: nomad-client.yml
   when: nomad_server | bool is false
   tags:
-    - nomad-network
+    - run-nomad-network
     - ferm-conf

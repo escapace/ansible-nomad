@@ -38,12 +38,12 @@
   include_role:
     name: escapace.cni
 
-- name: copy nomad-network script
+- name: copy run-nomad-network script
   ansible.builtin.copy:
-    src: files/nomad-network
-    dest: "{{ nomad_bin_dir }}/nomad-network"
+    src: files/run-nomad-network
+    dest: "{{ nomad_bin_dir }}/run-nomad-network"
     mode: 0755
     owner: root
     group: root
   tags:
-    - nomad-network
+    - run-nomad-network
