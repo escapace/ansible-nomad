@@ -9,6 +9,7 @@
     group: root
   tags:
     - ferm-conf
+  when: not nomad_role_debug | bool
 
 - name: enable systemd-modules-load.service
   service:
@@ -16,6 +17,7 @@
     enabled: true
   tags:
     - ferm-conf
+  when: not nomad_role_debug | bool
 
 - name: add the br_netfilter module
   modprobe:
@@ -23,6 +25,7 @@
     state: present
   tags:
     - ferm-conf
+  when: not nomad_role_debug | bool
 
 - name: set recommended kernel parameters
   sysctl:

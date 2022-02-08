@@ -1,8 +1,10 @@
 ---
 
 - name: install dependencies
-  package:
+  dnf:
     name: "{{ packages }}"
+    state: present
+    allowerasing: true
   vars:
     packages:
       - curl
