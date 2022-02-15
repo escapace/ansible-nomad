@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+set -e
+set -u
+set -o pipefail
+
+set -o allexport
+source "/etc/sysconfig/ec2-environment"
+set +o allexport
+
+readonly NOMAD_CA_FILE="/opt/nomad/tls/ca/consul-ca.pem"
+readonly NOMAD_CERT_FILE="/opt/nomad/tls/consul-nomad.pem"
+readonly NOMAD_KEY_FILE="/opt/nomad/tls/consul-nomad-key.pem"
+readonly NOMAD_MIN_PEERS="2"
+
+function api() {
+  curl -s -k \
+    –cacert "${NOMAD_CA_FILE}" \
+    –cert "${NOMAD_CERT_FILE}" \
+    –key "${NOMAD_KEY_FILE}" \
+    "https://127.0.0.1:4646${1}"
+}
+
+function nomad_check_peers() {
+  if [[ "$(api "/v1/status/peers" | jq -r '.|length' 2>/dev/null)" -ge "${NOMAD_MIN_PEERS}" ]]
+  then
+    true
+  else
+    return 1
+  fi
+}
+
+function nomad_online() {
+  nomad_check_has_leader
+  nomad_check_peers
+}
+
+nomad_online

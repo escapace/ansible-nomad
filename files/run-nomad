@@ -15,76 +15,125 @@ SCRIPT_NAME="$(basename "$0")"
 readonly NOMAD_CONFIG_FILE="default.hcl"
 readonly SYSTEMD_CONFIG_PATH="/usr/lib/systemd/system/nomad.service"
 
-set -o allexport
-source "/etc/sysconfig/ec2-environment"
-set +o allexport
+function wrap {
+ local strings="${1}"
+
+ local length
+ local cols
+ local width
+
+ length="$(echo -n "${strings}" | awk -F '|' '{print $1}' | awk '{ print length }' | sort -n | tail -1)"
+ cols="$(tput cols)"
+
+ if [[ $(( (cols - 4) / length )) -ge 2 ]]
+ then
+  if [[ $((cols - length - 4)) -ge 80 ]]
+  then
+    width=80
+  else
+    width=$((cols - length - 4))
+  fi
+
+   echo -e "${strings}" | \
+    fold -s -w "${width}" | \
+    sed -e "/--/! s|^| \||g" | \
+    column -t -s '|' | \
+    sed  's/^/  /'
+ else
+    local lines
+    local line
+    readarray -t lines <<< "${strings}"
+    local option
+    local description
+
+    if [[ "${cols}" -ge 80 ]]
+    then
+      width="78"
+    else
+      width=$((cols - 2))
+    fi
+
+    for line in "${lines[@]}"; do
+      option="${line%%|*}"
+      description=${line#*|}
+
+      echo "${option}"
+      echo
+      echo "${description}" | fold -s -w "${width}" |  sed  's/^/  /'
+      echo
+    done
+ fi
+}
 
 function print_usage {
   echo
-  echo "Usage: run-nomad [OPTIONS]"
+  echo "Usage: $SCRIPT_NAME [OPTIONS]"
   echo
   echo "This script is used to configure and run Nomad on an AWS server."
   echo
   echo "Options:"
   echo
-  echo -e "  --server\t\tIf set, run in server mode. Optional. At least one of --server or --client must be set."
-  echo -e "  --client\t\tIf set, run in client mode. Optional. At least one of --server or --client must be set."
-  echo -e "  --num-servers\t\tThe number of servers to expect in the Nomad cluster. Required if --server is true."
-  echo -e "  --config-dir\t\tThe path to the Nomad config folder. Optional. Default is the absolute path of '../config', relative to this script."
-  echo -e "  --data-dir\t\tThe path to the Nomad data folder. Optional. Default is the absolute path of '../data', relative to this script."
-  echo -e "  --bin-dir\t\tThe path to the folder with Nomad binary. Optional. Default is the absolute path of the parent folder of this script."
-  echo -e "  --systemd-stdout\t\tThe StandardOutput option of the systemd unit.  Optional.  If not configured, uses systemd's default (journal)."
-  echo -e "  --systemd-stderr\t\tThe StandardError option of the systemd unit.  Optional.  If not configured, uses systemd's default (inherit)."
-  echo -e "  --user\t\tThe user to run Nomad as. Optional. Default is to use the owner of --config-dir."
-  echo -e "  --use-sudo\t\tIf set, run the Nomad agent with sudo. By default, sudo is only used if --client is set."
-  echo -e "  --environment\t\A single environment variable in the key/value pair form 'KEY=\"val\"' to pass to Nomad as environment variable when starting it up. Repeat this option for additional variables. Optional."
-  echo -e "  --skip-nomad-config\tIf this flag is set, don't generate a Nomad configuration file. Optional. Default is false."
 
-  echo -e "  --enable-consul-acl-token\t\tEnable encryption of Consul ACL token. Optional."
-  echo -e "  --enable-gossip-encryption\t\tEnable encryption of gossip traffic between nodes. Optional. Must also specify --gossip-encryption-key."
-  echo -e "  --enable-tls-encryption\t\tEnable encryption of traffic between nodes. Optional."
-  echo -e "  --secrets-bucket-name\t\tAWS S3 secrets bucket name."
-  echo -e "  --verify-server-hostname\tWhen passed in, enable server hostname verification as part of RPC encryption."
-  echo -e "  --interface\tBind to interface. Optional."
-  echo -e "  --ipv6\tUse IPv6. Optional."
+  wrap "$(
+    echo -e "--server|If set, run in server mode."
+    echo -e "--client|If set, run in client mode."
+    echo -e "--num-servers|The number of servers to expect in the Nomad cluster. Required for server mode."
+    echo -e "--config-dir|The path to the Nomad config folder."
+    echo -e "--data-dir|The path to the Nomad data folder."
+    echo -e "--bin-dir|The path to the folder with Nomad binary."
+    echo -e "--systemd-stdout|The StandardOutput option of the systemd unit."
+    echo -e "--systemd-stderr|The StandardError option of the systemd unit."
+    echo -e "--user|The user to run Nomad as."
+    echo -e "--use-sudo|If set, run the Nomad agent with sudo."
+    echo -e "--environment|A single environment variable in the key/value pair form 'KEY=\"val\"' to pass to Nomad as environment variable when starting it up."
+    echo -e "--skip-nomad-config|If this flag is set, don't generate a Nomad configuration file."
+    echo -e "--enable-consul-acl-token|Enable encryption of Consul ACL token."
+    echo -e "--enable-gossip-encryption|Enable encryption of gossip traffic between nodes."
+    echo -e "--enable-tls-encryption|Enable encryption of traffic between nodes."
+    echo -e "--secrets-bucket-name|AWS S3 secrets bucket name."
+    echo -e "--verify-server-hostname|When passed in, enable server hostname verification as part of RPC encryption."
+    echo -e "--interface|Bind to interface."
+    echo -e "--ipv6|Use IPv6."
+  )"
   echo
   echo "Example:"
   echo
-  echo "  run-nomad --server --config-dir /custom/path/to/nomad/config"
+  echo "  $SCRIPT_NAME --server --config-dir /custom/path/to/nomad/config"
+  echo
 }
 
 function log {
-  local readonly level="$1"
-  local readonly message="$2"
-  local readonly timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+  local -r level="$1"
+  local -r message="$2"
+  local -r timestamp=$(date +"%Y-%m-%d %H:%M:%S")
   >&2 echo -e "${timestamp} [${level}] [$SCRIPT_NAME] ${message}"
 }
 
 function log_info {
-  local readonly message="$1"
+  local -r message="$1"
   log "INFO" "$message"
 }
 
 function log_warn {
-  local readonly message="$1"
+  local -r message="$1"
   log "WARN" "$message"
 }
 
 function log_error {
-  local readonly message="$1"
+  local -r message="$1"
   log "ERROR" "$message"
 }
 
 # Based on code from: http://stackoverflow.com/a/16623897/483528
 function strip_prefix {
-  local readonly str="$1"
-  local readonly prefix="$2"
+  local -r str="$1"
+  local -r prefix="$2"
   echo "${str#$prefix}"
 }
 
 function assert_not_empty {
-  local readonly arg_name="$1"
-  local readonly arg_value="$2"
+  local -r arg_name="$1"
+  local -r arg_value="$2"
 
   if [[ -z "$arg_value" ]]; then
     log_error "The value for '$arg_name' cannot be empty"
@@ -133,7 +182,7 @@ function get_object_value {
 }
 
 function assert_is_installed {
-  local readonly name="$1"
+  local -r name="$1"
 
   if [[ ! $(command -v ${name}) ]]; then
     log_error "The binary '$name' is required by this script but is not installed or in the system's PATH."
@@ -250,6 +299,10 @@ function generate_nomad_config {
     fi
 
     server_config=$(cat <<EOF
+acl {
+  enabled = true
+}
+
 server {
   enabled = true
   bootstrap_expect = $num_servers
@@ -351,7 +404,7 @@ name       = "$instance_id"
 region     = "$instance_region"
 
 addresses {
-  http = "${address}"
+  http = "127.0.0.1 ::1 ${address}"
   rpc  = "${address}"
   serf = "${address}"
 }
@@ -373,7 +426,7 @@ telemetry {
   publish_node_metrics       = true
   disable_hostname           = true
   prometheus_metrics         = true
-  collection_interval        = "10s"
+  collection_interval        = "1s"
 }
 
 consul {
@@ -473,7 +526,7 @@ function generate_systemd_config {
 
   log_info "Creating systemd config file to run Nomad in $systemd_config_path"
 
-  local readonly unit_config=$(cat <<EOF
+  local -r unit_config=$(cat <<EOF
 [Unit]
 Description="HashiCorp Nomad"
 Documentation=https://www.nomadproject.io/
@@ -490,7 +543,7 @@ ConditionFileNotEmpty=$config_path
 EOF
 )
 
-  local readonly service_config=$(cat <<EOF
+  local -r service_config=$(cat <<EOF
 [Service]
 User=$nomad_user
 Group=$nomad_user
@@ -518,7 +571,7 @@ EOF
     log_config+="StandardError=$nomad_sytemd_stderr\n"
   fi
 
-  local readonly install_config=$(cat <<EOF
+  local -r install_config=$(cat <<EOF
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -540,11 +593,39 @@ function start_nomad {
 
 # Based on: http://unix.stackexchange.com/a/7732/215969
 function get_owner_of_path {
-  local readonly path="$1"
+  local -r path="$1"
   ls -ld "$path" | awk '{print $3}'
 }
 
+function trust-ca {
+  local -r source="${1}"
+  local name
+
+  name="$(basename "${source}")"
+
+  local -r path="/etc/pki/ca-trust/source/anchors/${name}"
+
+  cp -f "${source}" "${path}"
+  chown root:root "${path}"
+  chmod 644 "${path}"
+
+  update-ca-trust
+}
+
 function run {
+  if [[ ! -f "/etc/sysconfig/ec2-environment" ]]
+  then
+    print_usage
+
+    log_error "/etc/sysconfig/ec2-environment: No such file"
+
+    exit 1
+  fi
+
+  set -o allexport
+  source "/etc/sysconfig/ec2-environment"
+  set +o allexport
+
   local server="false"
   local client="false"
   local num_servers=""
@@ -558,7 +639,7 @@ function run {
   local skip_nomad_config="false"
   local use_sudo=""
   local environment=()
-  local all_args=()
+  # local all_args=()
 
   local enable_gossip_encryption="false"
   local enable_tls_encryption="false"
@@ -690,6 +771,11 @@ function run {
   assert_is_installed "curl"
   assert_is_installed "jq"
   assert_is_installed "gomplate"
+
+  if [[ "$enable_tls_encryption" == "true" ]]
+  then
+    assert_is_installed "update-ca-trust"
+  fi
 
   if [[ -z "$config_dir" ]]; then
     config_dir=$(cd "$SCRIPT_DIR/../config" && pwd)
@@ -835,6 +921,8 @@ function run {
     "$server" \
     "$ipv6" \
     "$interface"
+
+  trust-ca "$nomad_ca_file_path"
 
   start_nomad
 }
