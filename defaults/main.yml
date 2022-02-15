@@ -1,6 +1,6 @@
 ---
 
-nomad_version: "1.2.3"
+nomad_version: "1.2.6"
 nomad_server: false
 nomad_volume: true
 nomad_volume_size: 45%VG
