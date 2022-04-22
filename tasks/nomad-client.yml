@@ -1,7 +1,7 @@
 ---
 
 - name: set br_netfilter module configuration
-  copy:
+  ansible.builtin.copy:
     content: "br_netfilter"
     dest: "/etc/modules-load.d/br_netfilter.conf"
     mode: 0644
@@ -12,7 +12,7 @@
   when: not nomad_role_debug | bool
 
 - name: enable systemd-modules-load.service
-  service:
+  ansible.builtin.service:
     name: systemd-modules-load
     enabled: true
   tags:
@@ -20,7 +20,7 @@
   when: not nomad_role_debug | bool
 
 - name: add the br_netfilter module
-  modprobe:
+  community.general.modprobe:
     name: br_netfilter
     state: present
   tags:
@@ -28,7 +28,7 @@
   when: not nomad_role_debug | bool
 
 - name: set recommended kernel parameters
-  sysctl:
+  ansible.posix.sysctl:
     name: "{{ item.name }}"
     value: "{{ item.value }}"
     state: present
@@ -38,7 +38,7 @@
   when: not nomad_role_debug | bool
 
 - name: include escapace.cni role
-  include_role:
+  ansible.builtin.include_role:
     name: escapace.cni
 
 - name: copy run-nomad-network script
