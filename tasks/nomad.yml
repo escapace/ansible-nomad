@@ -59,12 +59,12 @@
 - name: check nomad version
   ansible.builtin.slurp:
     src: "{{ nomad_dir }}/version"
-  register: nomad_current_vesion
+  register: nomad_current_version
   changed_when: false
   ignore_errors: true
 
 - name: install nomad
-  when: nomad_current_vesion.failed or nomad_current_vesion['content'] | b64decode != nomad_archive
+  when: nomad_current_version.failed or nomad_current_version['content'] | b64decode != nomad_archive
   block:
     - name: download nomad
       ansible.builtin.get_url:
