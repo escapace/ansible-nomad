@@ -929,7 +929,7 @@ export NOMAD_ADDR=https://localhost:4646
 EOF
 
   chown "root:root" "/etc/profile.d/nomad.sh"
-  chmod 640 "/etc/profile.d/nomad.sh"
+  chmod 644 "/etc/profile.d/nomad.sh"
 
   start_nomad
 }
