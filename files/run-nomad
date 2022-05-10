@@ -14,6 +14,9 @@ SCRIPT_NAME="$(basename "$0")"
 
 readonly NOMAD_CONFIG_FILE="default.hcl"
 readonly SYSTEMD_CONFIG_PATH="/usr/lib/systemd/system/nomad.service"
+readonly AWS_ASG_TAG_KEY="aws:autoscaling:groupName"
+readonly MAX_RETRIES=30
+readonly SLEEP_BETWEEN_RETRIES_SEC=10
 
 function wrap {
  local strings="${1}"
@@ -77,7 +80,6 @@ function print_usage {
   wrap "$(
     echo -e "--server|If set, run in server mode."
     echo -e "--client|If set, run in client mode."
-    echo -e "--num-servers|The number of servers to expect in the Nomad cluster. Required for server mode."
     echo -e "--config-dir|The path to the Nomad config folder."
     echo -e "--data-dir|The path to the Nomad data folder."
     echo -e "--bin-dir|The path to the folder with Nomad binary."
@@ -252,30 +254,89 @@ function get_prefix_cidr {
   echo "${!variable_reference}"
 }
 
+function get_instance_tags {
+  local -r instance_id="$1"
+  local -r instance_region="${EC2_INSTANCE_REGION}"
+  local tags=""
+  local count_tags=""
+
+  log_info "Looking up tags for Instance $instance_id in $instance_region"
+  for (( i=1; i<="$MAX_RETRIES"; i++ )); do
+    tags=$(aws ec2 describe-tags \
+      --region "$instance_region" \
+      --filters "Name=resource-type,Values=instance" "Name=resource-id,Values=${instance_id}")
+    count_tags=$(echo "$tags" | jq -r ".Tags? | length")
+    if [[ "$count_tags" -gt 0 ]]; then
+      log_info "This Instance $instance_id in $instance_region has Tags."
+      echo "$tags"
+      return
+    else
+      log_warn "This Instance $instance_id in $instance_region does not have any Tags."
+      log_warn "Will sleep for $SLEEP_BETWEEN_RETRIES_SEC seconds and try again."
+      sleep "$SLEEP_BETWEEN_RETRIES_SEC"
+    fi
+  done
+
+  log_error "Could not find Instance Tags for $instance_id in $instance_region after $MAX_RETRIES retries."
+  exit 1
+}
+
+function get_asg_size {
+  local -r asg_name="$1"
+  local -r aws_region="${EC2_INSTANCE_REGION}"
+  local asg_json=""
+
+  log_info "Looking up the size of the Auto Scaling Group $asg_name in $aws_region"
+  asg_json=$(aws autoscaling describe-auto-scaling-groups --region "$aws_region" --auto-scaling-group-names "$asg_name")
+  echo "$asg_json" | jq -r '.AutoScalingGroups[0].DesiredCapacity'
+}
+
+function get_cluster_size {
+  local -r instance_tags="$1"
+  local -r aws_region="${EC2_INSTANCE_REGION}"
+
+  local asg_name=""
+  asg_name=$(get_tag_value "$instance_tags" "$AWS_ASG_TAG_KEY")
+  if [[ -z "$asg_name" ]]; then
+    log_warn "This EC2 Instance does not appear to be part of an Auto Scaling Group, so cannot determine cluster size. Setting cluster size to 1."
+    echo 1
+  else
+    get_asg_size "$asg_name"
+  fi
+}
+
+# Get the value for a specific tag from the tags JSON returned by the AWS describe-tags:
+# https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-tags.html
+function get_tag_value {
+  local -r tags="$1"
+  local -r tag_key="$2"
+
+  echo "$tags" | jq -r ".Tags[] | select(.Key == \"$tag_key\") | .Value"
+}
+
 function generate_nomad_config {
   umask 027
 
   local -r server="${1}"
   local -r client="${2}"
-  local -r num_servers="${3}"
-  local -r config_dir="${4}"
-  local -r plugin_dir="${5}"
-  local -r user="${6}"
-  local -r enable_gossip_encryption="${7}"
-  local -r gossip_encryption_key="${8}"
-  local -r enable_consul_acl_token="${9}"
-  local -r consul_acl_token="${10}"
-  local -r enable_tls_encryption="${11}"
-  local -r ca_file_path="${12}"
-  local -r cert_file_path="${13}"
-  local -r key_file_path="${14}"
-  local -r consul_ca_file_path="${15}"
-  local -r consul_cert_file_path="${16}"
-  local -r consul_key_file_path="${17}"
-  local -r verify_server_hostname="${18}"
-  local -r verify_https_client="${19}"
-  local -r ipv6="${20}"
-  local -r interface="${21}"
+  local -r config_dir="${3}"
+  local -r plugin_dir="${4}"
+  local -r user="${5}"
+  local -r enable_gossip_encryption="${6}"
+  local -r gossip_encryption_key="${7}"
+  local -r enable_consul_acl_token="${8}"
+  local -r consul_acl_token="${9}"
+  local -r enable_tls_encryption="${10}"
+  local -r ca_file_path="${11}"
+  local -r cert_file_path="${12}"
+  local -r key_file_path="${13}"
+  local -r consul_ca_file_path="${14}"
+  local -r consul_cert_file_path="${15}"
+  local -r consul_key_file_path="${16}"
+  local -r verify_server_hostname="${17}"
+  local -r verify_https_client="${18}"
+  local -r ipv6="${19}"
+  local -r interface="${20}"
 
   local -r config_path="$config_dir/$NOMAD_CONFIG_FILE"
 
@@ -298,6 +359,12 @@ function generate_nomad_config {
       gossip_encryption_configuration="encrypt = \"$gossip_encryption_key\""
     fi
 
+    local instance_tags=""
+    local cluster_size=""
+
+    instance_tags=$(get_instance_tags "$instance_id")
+    cluster_size=$(get_cluster_size "$instance_tags")
+
     server_config=$(cat <<EOF
 acl {
   enabled = true
@@ -305,7 +372,7 @@ acl {
 
 server {
   enabled = true
-  bootstrap_expect = $num_servers
+  bootstrap_expect = $cluster_size
   $gossip_encryption_configuration
 
   default_scheduler_config {
@@ -628,7 +695,6 @@ function run {
 
   local server="false"
   local client="false"
-  local num_servers=""
   local config_dir=""
   local plugin_dir=""
   local data_dir=""
@@ -660,10 +726,6 @@ function run {
         ;;
       --client)
         client="true"
-        ;;
-      --num-servers)
-        num_servers="$2"
-        shift
         ;;
       --config-dir)
         assert_not_empty "$key" "$2"
@@ -885,7 +947,6 @@ function run {
     generate_nomad_config \
       "$server" \
       "$client" \
-      "$num_servers" \
       "$config_dir" \
       "$plugin_dir" \
       "$user" \
