@@ -497,7 +497,7 @@ telemetry {
 }
 
 consul {
-  address = "127.0.0.1:${consul_port}"
+  address = "[::1]:${consul_port}"
 
   $consul_acl_token_configuration
   $consul_tls_encryption_configuration
