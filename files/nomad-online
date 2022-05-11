@@ -18,7 +18,7 @@ function api() {
     –cacert "${NOMAD_CA_FILE}" \
     –cert "${NOMAD_CERT_FILE}" \
     –key "${NOMAD_KEY_FILE}" \
-    "https://127.0.0.1:4646${1}"
+    "https://[::1]:4646${1}"
 }
 
 function nomad_check_peers() {
