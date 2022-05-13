@@ -409,7 +409,7 @@ plugin "docker" {
     endpoint = "unix:///run/docker.sock"
 
     logging {
-      type = "journald""
+      type = "journald"
     }
 
     allow_privileged = true
