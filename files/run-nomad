@@ -408,10 +408,6 @@ plugin "docker" {
   config {
     endpoint = "unix:///run/docker.sock"
 
-    logging {
-      type = "journald"
-    }
-
     allow_privileged = true
 
     volumes {
