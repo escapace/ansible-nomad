@@ -249,6 +249,7 @@ EOF
     local -r kresd_network_interface_conf_path="${kresd_directory_path}/410-network-${interface}.conf"
     local -r kresd_view_nomad_bridge_conf_path="${kresd_directory_path}/920-view-nomad-bridge.conf"
     local -r kresd_view_nomad_vpc_conf_path="${kresd_directory_path}/920-view-nomad-vpc.conf"
+    local -r kresd_view_self_conf_path="${kresd_directory_path}/920-view-nomad-self.conf"
 
     local -r kresd_network_interface_conf=$(cat <<EOF
 net.listen('${dns_ipv4_address}', 53, { kind = 'dns', freebind = true })
@@ -259,9 +260,21 @@ EOF
     log_info "${kresd_network_interface_conf_path}: knot-resolver configuration."
 
     echo -e "$kresd_network_interface_conf" > "$kresd_network_interface_conf_path"
-
     chown root:knot-resolver "$kresd_network_interface_conf_path"
     chmod 640 "$kresd_network_interface_conf_path"
+
+
+    local -r kresd_view_self_conf=$(cat <<EOF
+view:addr('${dns_ipv4_address}', policy.all(policy.PASS))
+view:addr('${dns_ipv6_address}', policy.all(policy.PASS))
+EOF
+)
+
+    log_info "${kresd_view_self_conf_path}: knot-resolver configuration."
+
+    echo -e "$kresd_view_self_conf" > "$kresd_view_self_conf_path"
+    chown root:knot-resolver "$kresd_view_self_conf_path"
+    chmod 640 "$kresd_view_self_conf_path"
 
     local -r kresd_view_nomad_bridge_conf=$(cat <<EOF
 view:addr('${nomad_bridge_network_subnet}', policy.all(policy.PASS))
