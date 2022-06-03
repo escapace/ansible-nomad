@@ -18,39 +18,36 @@ readonly AWS_ASG_TAG_KEY="aws:autoscaling:groupName"
 readonly MAX_RETRIES=30
 readonly SLEEP_BETWEEN_RETRIES_SEC=10
 
-function wrap {
- local strings="${1}"
+function wrap() {
+  local strings="${1}"
 
- local length
- local cols
- local width
+  local length
+  local cols
+  local width
 
- length="$(echo -n "${strings}" | awk -F '|' '{print $1}' | awk '{ print length }' | sort -n | tail -1)"
- cols="$(tput cols)"
+  length="$(echo -n "${strings}" | awk -F '|' '{print $1}' | awk '{ print length }' | sort -n | tail -1)"
+  cols="$(tput cols)"
 
- if [[ $(( (cols - 4) / length )) -ge 2 ]]
- then
-  if [[ $((cols - length - 4)) -ge 80 ]]
-  then
-    width=80
+  if [[ $(((cols - 4) / length)) -ge 2 ]]; then
+    if [[ $((cols - length - 4)) -ge 80 ]]; then
+      width=80
+    else
+      width=$((cols - length - 4))
+    fi
+
+    echo -e "${strings}" \
+      | fold -s -w "${width}" \
+      | sed -e "/--/! s|^| \||g" \
+      | column -t -s '|' \
+      | sed 's/^/  /'
   else
-    width=$((cols - length - 4))
-  fi
-
-   echo -e "${strings}" | \
-    fold -s -w "${width}" | \
-    sed -e "/--/! s|^| \||g" | \
-    column -t -s '|' | \
-    sed  's/^/  /'
- else
     local lines
     local line
     readarray -t lines <<< "${strings}"
     local option
     local description
 
-    if [[ "${cols}" -ge 80 ]]
-    then
+    if [[ "${cols}" -ge 80 ]]; then
       width="78"
     else
       width=$((cols - 2))
@@ -62,13 +59,13 @@ function wrap {
 
       echo "${option}"
       echo
-      echo "${description}" | fold -s -w "${width}" |  sed  's/^/  /'
+      echo "${description}" | fold -s -w "${width}" | sed 's/^/  /'
       echo
     done
- fi
+  fi
 }
 
-function print_usage {
+function print_usage() {
   echo
   echo "Usage: $SCRIPT_NAME [OPTIONS]"
   echo
@@ -78,17 +75,8 @@ function print_usage {
   echo
 
   wrap "$(
-    echo -e "--server|If set, run in server mode."
-    echo -e "--client|If set, run in client mode."
-    echo -e "--config-dir|The path to the Nomad config folder."
-    echo -e "--data-dir|The path to the Nomad data folder."
-    echo -e "--bin-dir|The path to the folder with Nomad binary."
-    echo -e "--systemd-stdout|The StandardOutput option of the systemd unit."
-    echo -e "--systemd-stderr|The StandardError option of the systemd unit."
-    echo -e "--user|The user to run Nomad as."
-    echo -e "--use-sudo|If set, run the Nomad agent with sudo."
+    echo -e "--role|The instance role, one of \"server\", \"client\" or \"bastion\"."
     echo -e "--environment|A single environment variable in the key/value pair form 'KEY=\"val\"' to pass to Nomad as environment variable when starting it up."
-    echo -e "--skip-nomad-config|If this flag is set, don't generate a Nomad configuration file."
     echo -e "--enable-consul-acl-token|Enable encryption of Consul ACL token."
     echo -e "--enable-gossip-encryption|Enable encryption of gossip traffic between nodes."
     echo -e "--enable-tls-encryption|Enable encryption of traffic between nodes."
@@ -100,40 +88,40 @@ function print_usage {
   echo
   echo "Example:"
   echo
-  echo "  $SCRIPT_NAME --server --config-dir /custom/path/to/nomad/config"
+  echo "  $SCRIPT_NAME --server"
   echo
 }
 
-function log {
+function log() {
   local -r level="$1"
   local -r message="$2"
   local -r timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-  >&2 echo -e "${timestamp} [${level}] [$SCRIPT_NAME] ${message}"
+  echo >&2 -e "${timestamp} [${level}] [$SCRIPT_NAME] ${message}"
 }
 
-function log_info {
+function log_info() {
   local -r message="$1"
   log "INFO" "$message"
 }
 
-function log_warn {
+function log_warn() {
   local -r message="$1"
   log "WARN" "$message"
 }
 
-function log_error {
+function log_error() {
   local -r message="$1"
   log "ERROR" "$message"
 }
 
 # Based on code from: http://stackoverflow.com/a/16623897/483528
-function strip_prefix {
+function strip_prefix() {
   local -r str="$1"
   local -r prefix="$2"
   echo "${str#$prefix}"
 }
 
-function assert_not_empty {
+function assert_not_empty() {
   local -r arg_name="$1"
   local -r arg_value="$2"
 
@@ -144,7 +132,7 @@ function assert_not_empty {
   fi
 }
 
-function split_by_lines {
+function split_by_lines() {
   local prefix="$1"
   shift
 
@@ -153,7 +141,7 @@ function split_by_lines {
   done
 }
 
-function get_object {
+function get_object() {
   local -r secrets_bucket_name="$1"
   local -r source="$2"
   local -r target="$3"
@@ -171,7 +159,7 @@ function get_object {
   chown "${user}:${user}" "${target}"
 }
 
-function get_object_value {
+function get_object_value() {
   local -r secrets_bucket_name="$1"
   local -r source="$2"
 
@@ -183,7 +171,7 @@ function get_object_value {
     "s3://${secrets_bucket_name}/${key}" /dev/stdout || exit 1
 }
 
-function assert_is_installed {
+function assert_is_installed() {
   local -r name="$1"
 
   if [[ ! $(command -v ${name}) ]]; then
@@ -192,12 +180,11 @@ function assert_is_installed {
   fi
 }
 
-function address_type {
+function address_type() {
   local -r ipv6="${1}"
   local type
 
-  if [[ "$ipv6" == "true" ]]
-  then
+  if [[ "$ipv6" == "true" ]]; then
     type="ipv6"
   else
     type="ipv4"
@@ -206,7 +193,7 @@ function address_type {
   echo "${type}"
 }
 
-function get_nomad_address {
+function get_nomad_address() {
   local -r server="${1}"
   local -r ipv6="${2}"
   local -r interface="${3}"
@@ -226,7 +213,7 @@ function get_nomad_address {
   echo "${!variable_reference}"
 }
 
-function get_vpc_cidr {
+function get_vpc_cidr() {
   local -r ipv6="${1}"
   local -r interface="${2}"
 
@@ -240,7 +227,7 @@ function get_vpc_cidr {
   echo "${!variable_reference}"
 }
 
-function get_prefix_cidr {
+function get_prefix_cidr() {
   local -r ipv6="${1}"
   local -r interface="${2}"
 
@@ -254,14 +241,14 @@ function get_prefix_cidr {
   echo "${!variable_reference}"
 }
 
-function get_instance_tags {
+function get_instance_tags() {
   local -r instance_id="$1"
   local -r instance_region="${EC2_INSTANCE_REGION}"
   local tags=""
   local count_tags=""
 
   log_info "Looking up tags for Instance $instance_id in $instance_region"
-  for (( i=1; i<="$MAX_RETRIES"; i++ )); do
+  for ((i = 1; i <= "$MAX_RETRIES"; i++)); do
     tags=$(aws ec2 describe-tags \
       --region "$instance_region" \
       --filters "Name=resource-type,Values=instance" "Name=resource-id,Values=${instance_id}")
@@ -281,7 +268,7 @@ function get_instance_tags {
   exit 1
 }
 
-function get_asg_size {
+function get_asg_size() {
   local -r asg_name="$1"
   local -r aws_region="${EC2_INSTANCE_REGION}"
   local asg_json=""
@@ -291,7 +278,7 @@ function get_asg_size {
   echo "$asg_json" | jq -r '.AutoScalingGroups[0].DesiredCapacity'
 }
 
-function get_cluster_size {
+function get_cluster_size() {
   local -r instance_tags="$1"
   local -r aws_region="${EC2_INSTANCE_REGION}"
 
@@ -307,36 +294,35 @@ function get_cluster_size {
 
 # Get the value for a specific tag from the tags JSON returned by the AWS describe-tags:
 # https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-tags.html
-function get_tag_value {
+function get_tag_value() {
   local -r tags="$1"
   local -r tag_key="$2"
 
   echo "$tags" | jq -r ".Tags[] | select(.Key == \"$tag_key\") | .Value"
 }
 
-function generate_nomad_config {
+function generate_nomad_config() {
   umask 027
 
   local -r server="${1}"
-  local -r client="${2}"
-  local -r config_dir="${3}"
-  local -r plugin_dir="${4}"
-  local -r user="${5}"
-  local -r enable_gossip_encryption="${6}"
-  local -r gossip_encryption_key="${7}"
-  local -r enable_consul_acl_token="${8}"
-  local -r consul_acl_token="${9}"
-  local -r enable_tls_encryption="${10}"
-  local -r ca_file_path="${11}"
-  local -r cert_file_path="${12}"
-  local -r key_file_path="${13}"
-  local -r consul_ca_file_path="${14}"
-  local -r consul_cert_file_path="${15}"
-  local -r consul_key_file_path="${16}"
-  local -r verify_server_hostname="${17}"
-  local -r verify_https_client="${18}"
-  local -r ipv6="${19}"
-  local -r interface="${20}"
+  local -r config_dir="${2}"
+  local -r plugin_dir="${3}"
+  local -r user="${4}"
+  local -r enable_gossip_encryption="${5}"
+  local -r gossip_encryption_key="${6}"
+  local -r enable_consul_acl_token="${7}"
+  local -r consul_acl_token="${8}"
+  local -r enable_tls_encryption="${9}"
+  local -r ca_file_path="${10}"
+  local -r cert_file_path="${11}"
+  local -r key_file_path="${12}"
+  local -r consul_ca_file_path="${13}"
+  local -r consul_cert_file_path="${14}"
+  local -r consul_key_file_path="${15}"
+  local -r verify_server_hostname="${16}"
+  local -r verify_https_client="${17}"
+  local -r ipv6="${18}"
+  local -r interface="${19}"
 
   local -r config_path="$config_dir/$NOMAD_CONFIG_FILE"
 
@@ -365,7 +351,8 @@ function generate_nomad_config {
     instance_tags=$(get_instance_tags "$instance_id")
     cluster_size=$(get_cluster_size "$instance_tags")
 
-    server_config=$(cat <<EOF
+    server_config=$(
+      cat << EOF
 acl {
   enabled = true
 }
@@ -389,12 +376,13 @@ server {
   }
 }
 EOF
-)
+    )
   fi
 
   local client_config=""
-  if [[ "$client" == "true" ]]; then
-    client_config=$(cat <<EOF
+  if [[ "$server" == "false" ]]; then
+    client_config=$(
+      cat << EOF
 client {
   enabled = true
   network_interface = "${interface}"
@@ -418,7 +406,7 @@ plugin "docker" {
 }
 
 EOF
-)
+    )
   fi
 
   local consul_acl_token_configuration=""
@@ -431,7 +419,8 @@ EOF
   local tls_encryption_configuration=""
   if [[ "$enable_tls_encryption" == "true" && -n "$ca_file_path" && -n "$cert_file_path" && -n "$key_file_path" ]]; then
     log_info "Creating TLS encryption configuration"
-    tls_encryption_configuration=$(cat <<EOF
+    tls_encryption_configuration=$(
+      cat << EOF
 tls {
   http = true
   rpc  = true
@@ -444,7 +433,7 @@ tls {
   verify_https_client    = $verify_https_client
 }
 EOF
-)
+    )
   fi
 
   local consul_tls_encryption_configuration=""
@@ -454,7 +443,8 @@ EOF
 
     consul_port="8501"
 
-    consul_tls_encryption_configuration=$(cat <<EOF
+    consul_tls_encryption_configuration=$(
+      cat << EOF
 
   ssl        = true
   verify_ssl = true
@@ -462,11 +452,11 @@ EOF
   cert_file  = "$consul_cert_file_path"
   key_file   = "$consul_key_file_path"
 EOF
-)
+    )
   fi
 
   log_info "Creating default Nomad config file in $config_path"
-  cat > "$config_path" <<EOF
+  cat > "$config_path" << EOF
 plugin_dir = "${plugin_dir}"
 datacenter = "$availability_zone"
 name       = "$instance_id"
@@ -508,7 +498,7 @@ EOF
   chown "$user:$user" "$config_path"
 }
 
-function generate_ferm_config {
+function generate_ferm_config() {
   log_info "Writing ferm configuration"
 
   local server="$1"
@@ -522,8 +512,7 @@ function generate_ferm_config {
   local prefix_cidr=""
   local vpc_cidr
 
-  if [[ "$ipv6" == "true"  ]]
-  then
+  if [[ "$ipv6" == "true" ]]; then
     domain="ip6"
   else
     domain="ip"
@@ -532,12 +521,12 @@ function generate_ferm_config {
   address="$(get_nomad_address "${server}" "${ipv6}" "${interface}")"
   vpc_cidr="$(get_vpc_cidr "${ipv6}" "${interface}")"
 
-  if [[ "$server" == "false"  ]]
-  then
+  if [[ "$server" == "false" ]]; then
     prefix_cidr="$(get_prefix_cidr "${ipv6}" "${interface}")"
   fi
 
-  local -r template=$(cat <<EOF
+  local -r template=$(
+    cat << EOF
 domain (ip ip6) table filter {
   chain OUTPUT {
     daddr (169.254.169.254 fd00:ec2::254) proto tcp mod owner uid-owner "nomad" ACCEPT;
@@ -549,7 +538,10 @@ domain ({{ (ds "data").domain }}) table filter chain INPUT saddr {{ (ds "data").
   # servers, and for inter-server traffic for the consensus algorithm
   # (raft).
   proto tcp dport 4647 ACCEPT;
+}
 
+{{ if bool ((ds "data").server) }}
+domain ({{ (ds "data").domain }}) table filter chain INPUT saddr {{ (ds "data").vpc_cidr }} daddr {{ (ds "data").address }} {
   # The port used for the gossip protocol for cluster membership. Both TCP
   # and UDP should be routable between the server nodes on this port.
   proto (tcp udp) dport 4648 ACCEPT;
@@ -557,12 +549,10 @@ domain ({{ (ds "data").domain }}) table filter chain INPUT saddr {{ (ds "data").
   # The port used to run the HTTP server
   proto tcp dport 4646 ACCEPT;
 }
-
-{{ if bool ((ds "data").server) }}
 {{ else }}
 {{ end }}
 EOF
-)
+  )
 
   echo "{ \"server\": ${server}, \"domain\": \"${domain}\", \"address\": \"${address}\", \"vpc_cidr\": \"${vpc_cidr}\", \"prefix_cidr\": \"${prefix_cidr}\" }" | jq '.' | gomplate \
     -i "${template}" -d data=stdin:///data.json > "${template_path}"
@@ -571,19 +561,17 @@ EOF
   chmod 600 "${template_path}"
 }
 
-function generate_systemd_config {
+function generate_systemd_config() {
   umask 022
 
   local -r systemd_config_path="${1}"
   local -r nomad_config_dir="${2}"
   local -r nomad_data_dir="${3}"
   local -r nomad_bin_dir="${4}"
-  local -r nomad_sytemd_stdout="${5}"
-  local -r nomad_sytemd_stderr="${6}"
-  local nomad_user="${7}"
-  local -r use_sudo="${8}"
+  local nomad_user="${5}"
+  local -r use_sudo="${6}"
 
-  shift 8
+  shift 6
 
   local -r environment=("$@")
   local -r config_path="$nomad_config_dir/$NOMAD_CONFIG_FILE"
@@ -595,7 +583,8 @@ function generate_systemd_config {
 
   log_info "Creating systemd config file to run Nomad in $systemd_config_path"
 
-  local -r unit_config=$(cat <<EOF
+  local -r unit_config=$(
+    cat << EOF
 [Unit]
 Description="HashiCorp Nomad"
 Documentation=https://www.nomadproject.io/
@@ -610,9 +599,10 @@ Wants=network-online.target
 ConditionFileNotEmpty=$config_path
 
 EOF
-)
+  )
 
-  local -r service_config=$(cat <<EOF
+  local -r service_config=$(
+    cat << EOF
 [Service]
 User=$nomad_user
 Group=$nomad_user
@@ -630,29 +620,21 @@ TasksMax=infinity
 $(split_by_lines "Environment=" "${environment[@]}")
 
 EOF
-)
+  )
 
-  local log_config=""
-  if [[ ! -z $nomad_sytemd_stdout ]]; then
-    log_config+="StandardOutput=$nomad_sytemd_stdout\n"
-  fi
-  if [[ ! -z $nomad_sytemd_stderr ]]; then
-    log_config+="StandardError=$nomad_sytemd_stderr\n"
-  fi
-
-  local -r install_config=$(cat <<EOF
+  local -r install_config=$(
+    cat << EOF
 [Install]
 WantedBy=multi-user.target
 EOF
-)
+  )
 
   echo -e "$unit_config" > "$systemd_config_path"
   echo -e "$service_config" >> "$systemd_config_path"
-  echo -e "$log_config" >> "$systemd_config_path"
   echo -e "$install_config" >> "$systemd_config_path"
 }
 
-function start_nomad {
+function start_nomad() {
   log_info "Reloading systemd config and starting Nomad"
 
   sudo systemctl daemon-reload
@@ -661,12 +643,12 @@ function start_nomad {
 }
 
 # Based on: http://unix.stackexchange.com/a/7732/215969
-function get_owner_of_path {
+function get_owner_of_path() {
   local -r path="$1"
   ls -ld "$path" | awk '{print $3}'
 }
 
-function trust-ca {
+function trust-ca() {
   local -r source="${1}"
   local name
 
@@ -681,9 +663,8 @@ function trust-ca {
   update-ca-trust
 }
 
-function run {
-  if [[ ! -f "/etc/sysconfig/ec2-environment" ]]
-  then
+function run() {
+  if [[ ! -f "/etc/sysconfig/ec2-environment" ]]; then
     print_usage
 
     log_error "/etc/sysconfig/ec2-environment: No such file"
@@ -695,19 +676,9 @@ function run {
   source "/etc/sysconfig/ec2-environment"
   set +o allexport
 
+  local role=""
   local server="false"
-  local client="false"
-  local config_dir=""
-  local plugin_dir=""
-  local data_dir=""
-  local bin_dir=""
-  local systemd_stdout=""
-  local systemd_stderr=""
-  local user=""
-  local skip_nomad_config="false"
-  local use_sudo=""
   local environment=()
-  # local all_args=()
 
   local enable_gossip_encryption="false"
   local enable_tls_encryption="false"
@@ -723,57 +694,15 @@ function run {
     local key="$1"
 
     case "$key" in
-      --server)
-        server="true"
-        ;;
-      --client)
-        client="true"
-        ;;
-      --config-dir)
+      --role)
         assert_not_empty "$key" "$2"
-        config_dir="$2"
-        shift
-        ;;
-      --plugin-dir)
-        assert_not_empty "$key" "$2"
-        plugin_dir="$2"
-        shift
-        ;;
-      --data-dir)
-        assert_not_empty "$key" "$2"
-        data_dir="$2"
-        shift
-        ;;
-      --bin-dir)
-        assert_not_empty "$key" "$2"
-        bin_dir="$2"
-        shift
-        ;;
-      --systemd-stdout)
-        assert_not_empty "$key" "$2"
-        systemd_stdout="$2"
-        shift
-        ;;
-      --systemd-stderr)
-        assert_not_empty "$key" "$2"
-        systemd_stderr="$2"
-        shift
-        ;;
-      --user)
-        assert_not_empty "$key" "$2"
-        user="$2"
+        role="$2"
         shift
         ;;
       --secrets-bucket-name)
         assert_not_empty "$key" "$2"
         secrets_bucket_name="$2"
         shift
-        ;;
-      --skip-nomad-config)
-        skip_nomad_config="true"
-        ;;
-      --use-sudo)
-        use_sudo="true"
         ;;
       --enable-gossip-encryption)
         enable_gossip_encryption="true"
@@ -817,17 +746,26 @@ function run {
     shift
   done
 
-  if [[ ("$server" == "true" && "$client" == "true") || ("$server" == "false" && "$client" == "false") ]]; then
-    log_error "Exactly one of --server or --client must be set."
+  assert_not_empty "--role" "$role"
+  assert_not_empty "--secrets-bucket-name" "$secrets_bucket_name"
+
+  if [[ "$role" == "server" ]]; then
+    server="true"
+  elif [[ "$role" == "client" ]]; then
+    server="false"
+  elif [[ "$role" == "bastion" ]]; then
+    server="false"
+  else
+    log_error "Unrecognized value for the --role flag."
     exit 1
   fi
 
-  if [[ -z "$use_sudo" ]]; then
-    if [[ "$client" == "true" ]]; then
-      use_sudo="true"
-    else
-      use_sudo="false"
-    fi
+  local use_sudo
+
+  if [[ "$server" == "false" ]]; then
+    use_sudo="true"
+  else
+    use_sudo="false"
   fi
 
   assert_is_installed "systemctl"
@@ -836,32 +774,21 @@ function run {
   assert_is_installed "jq"
   assert_is_installed "gomplate"
 
-  if [[ "$enable_tls_encryption" == "true" ]]
-  then
+  if [[ "$enable_tls_encryption" == "true" ]]; then
     assert_is_installed "update-ca-trust"
   fi
 
-  if [[ -z "$config_dir" ]]; then
-    config_dir=$(cd "$SCRIPT_DIR/../config" && pwd)
-  fi
+  local config_dir
+  local plugin_dir
+  local data_dir
+  local bin_dir
+  local user
 
-  if [[ -z "$plugin_dir" ]]; then
-    plugin_dir=$(cd "$SCRIPT_DIR/../plugins" && pwd)
-  fi
-
-  if [[ -z "$data_dir" ]]; then
-    data_dir=$(cd "$SCRIPT_DIR/../data" && pwd)
-  fi
-
-  if [[ -z "$bin_dir" ]]; then
-    bin_dir=$(cd "$SCRIPT_DIR/../bin" && pwd)
-  fi
-
-  # If $systemd_stdout and/or $systemd_stderr are empty, we leave them empty so that generate_systemd_config will use systemd's defaults (journal and inherit, respectively)
-
-  if [[ -z "$user" ]]; then
-    user=$(get_owner_of_path "$config_dir")
-  fi
+  config_dir=$(cd "$SCRIPT_DIR/../config" && pwd)
+  plugin_dir=$(cd "$SCRIPT_DIR/../plugins" && pwd)
+  data_dir=$(cd "$SCRIPT_DIR/../data" && pwd)
+  bin_dir=$(cd "$SCRIPT_DIR/../bin" && pwd)
+  user=$(get_owner_of_path "$config_dir")
 
   local nomad_ca_file_path=""
   local nomad_cert_file_path=""
@@ -882,100 +809,87 @@ function run {
     type="client"
   fi
 
-  if [[ "$skip_nomad_config" == "true" ]]; then
-    log_info "The --skip-nomad-config flag is set, so will not generate a default Nomad config file."
-  else
-    assert_not_empty "--secrets-bucket-name" "$secrets_bucket_name"
-
-    if [[ "$enable_gossip_encryption" == "true" ]]
-    then
-      gossip_encryption_key="$(get_object_value "${secrets_bucket_name}" "${type}/nomad/nomad-gossip-encryption-key")"
-    fi
-
-    if [[ "$enable_consul_acl_token" == "true" ]]
-    then
-      consul_acl_token="$(get_object_value "${secrets_bucket_name}" "${type}/nomad/consul-acl-token-nomad-${type}")"
-    fi
-
-    if [[ "$enable_tls_encryption" == "true" ]]; then
-      local tls_path
-      local tls_ca_path
-
-      tls_path="$(cd "$SCRIPT_DIR/../tls" && pwd)"
-      tls_ca_path="$(cd "$SCRIPT_DIR/../tls/ca" && pwd)"
-
-      nomad_ca_file_path="${tls_ca_path}/nomad-ca.pem"
-      nomad_cert_file_path="${tls_path}/nomad-${type}.pem"
-      nomad_key_file_path="${tls_path}/nomad-${type}-key.pem"
-
-      get_object "${secrets_bucket_name}" \
-        "${type}/nomad/nomad-ca.pem" \
-        "${nomad_ca_file_path}" \
-        "${user}"
-
-      get_object "${secrets_bucket_name}" \
-        "${type}/nomad/nomad-${type}.pem" \
-        "${nomad_cert_file_path}" \
-        "${user}"
-
-      get_object "${secrets_bucket_name}" \
-        "${type}/nomad/nomad-${type}-key.pem" \
-        "${nomad_key_file_path}" \
-        "${user}"
-
-      # Consul TLS
-      consul_ca_file_path="${tls_ca_path}/consul-ca.pem"
-      consul_cert_file_path="${tls_path}/consul-nomad.pem"
-      consul_key_file_path="${tls_path}/consul-nomad-key.pem"
-
-      get_object "${secrets_bucket_name}" \
-        "${type}/nomad/consul-ca.pem" \
-        "${consul_ca_file_path}" \
-        "${user}"
-
-      # if [[ "$server" == "true" ]]
-      # then
-      get_object "${secrets_bucket_name}" \
-        "${type}/nomad/consul-nomad.pem" \
-        "${consul_cert_file_path}" \
-        "${user}"
-
-      get_object "${secrets_bucket_name}" \
-        "${type}/nomad/consul-nomad-key.pem" \
-        "${consul_key_file_path}" \
-        "${user}"
-    fi
-
-    generate_nomad_config \
-      "$server" \
-      "$client" \
-      "$config_dir" \
-      "$plugin_dir" \
-      "$user" \
-      "$enable_gossip_encryption" \
-      "$gossip_encryption_key" \
-      "$enable_consul_acl_token" \
-      "$consul_acl_token" \
-      "$enable_tls_encryption" \
-      "$nomad_ca_file_path" \
-      "$nomad_cert_file_path" \
-      "$nomad_key_file_path" \
-      "$consul_ca_file_path" \
-      "$consul_cert_file_path" \
-      "$consul_key_file_path" \
-      "$verify_server_hostname" \
-      "$verify_https_client" \
-      "$ipv6" \
-      "$interface"
+  if [[ "$enable_gossip_encryption" == "true" ]]; then
+    gossip_encryption_key="$(get_object_value "${secrets_bucket_name}" "${role}/nomad/nomad-gossip-encryption-key")"
   fi
+
+  if [[ "$enable_consul_acl_token" == "true" ]]; then
+    consul_acl_token="$(get_object_value "${secrets_bucket_name}" "${role}/nomad/consul-acl-token-nomad-${type}")"
+  fi
+
+  if [[ "$enable_tls_encryption" == "true" ]]; then
+    local tls_path
+    local tls_ca_path
+
+    tls_path="$(cd "$SCRIPT_DIR/../tls" && pwd)"
+    tls_ca_path="$(cd "$SCRIPT_DIR/../tls/ca" && pwd)"
+
+    nomad_ca_file_path="${tls_ca_path}/nomad-ca.pem"
+    nomad_cert_file_path="${tls_path}/nomad-${type}.pem"
+    nomad_key_file_path="${tls_path}/nomad-${type}-key.pem"
+
+    get_object "${secrets_bucket_name}" \
+      "${role}/nomad/nomad-ca.pem" \
+      "${nomad_ca_file_path}" \
+      "${user}"
+
+    get_object "${secrets_bucket_name}" \
+      "${role}/nomad/nomad-${type}.pem" \
+      "${nomad_cert_file_path}" \
+      "${user}"
+
+    get_object "${secrets_bucket_name}" \
+      "${role}/nomad/nomad-${type}-key.pem" \
+      "${nomad_key_file_path}" \
+      "${user}"
+
+    # Consul TLS
+    consul_ca_file_path="${tls_ca_path}/consul-ca.pem"
+    consul_cert_file_path="${tls_path}/consul-nomad.pem"
+    consul_key_file_path="${tls_path}/consul-nomad-key.pem"
+
+    get_object "${secrets_bucket_name}" \
+      "${role}/nomad/consul-ca.pem" \
+      "${consul_ca_file_path}" \
+      "${user}"
+
+    get_object "${secrets_bucket_name}" \
+      "${role}/nomad/consul-nomad.pem" \
+      "${consul_cert_file_path}" \
+      "${user}"
+
+    get_object "${secrets_bucket_name}" \
+      "${role}/nomad/consul-nomad-key.pem" \
+      "${consul_key_file_path}" \
+      "${user}"
+  fi
+
+  generate_nomad_config \
+    "$server" \
+    "$config_dir" \
+    "$plugin_dir" \
+    "$user" \
+    "$enable_gossip_encryption" \
+    "$gossip_encryption_key" \
+    "$enable_consul_acl_token" \
+    "$consul_acl_token" \
+    "$enable_tls_encryption" \
+    "$nomad_ca_file_path" \
+    "$nomad_cert_file_path" \
+    "$nomad_key_file_path" \
+    "$consul_ca_file_path" \
+    "$consul_cert_file_path" \
+    "$consul_key_file_path" \
+    "$verify_server_hostname" \
+    "$verify_https_client" \
+    "$ipv6" \
+    "$interface"
 
   generate_systemd_config \
     "$SYSTEMD_CONFIG_PATH" \
     "$config_dir" \
     "$data_dir" \
     "$bin_dir" \
-    "$systemd_stdout" \
-    "$systemd_stderr" \
     "$user" \
     "$use_sudo" \
     "${environment[@]}"
@@ -987,7 +901,7 @@ function run {
 
   trust-ca "$nomad_ca_file_path"
 
-  cat > "/etc/profile.d/nomad.sh" <<EOF
+  cat > "/etc/profile.d/nomad.sh" << EOF
 export NOMAD_ADDR=https://localhost:4646
 EOF
 
