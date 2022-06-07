@@ -902,7 +902,7 @@ function run() {
   trust-ca "$nomad_ca_file_path"
 
   cat > "/etc/profile.d/nomad.sh" << EOF
-export NOMAD_ADDR=https://localhost:4646
+export NOMAD_ADDR=https://[::1]:4646
 EOF
 
   chown "root:root" "/etc/profile.d/nomad.sh"
