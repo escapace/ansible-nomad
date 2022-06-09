@@ -77,9 +77,6 @@ function print_usage() {
   wrap "$(
     echo -e "--role|The instance role, one of \"server\", \"client\" or \"bastion\"."
     echo -e "--environment|A single environment variable in the key/value pair form 'KEY=\"val\"' to pass to Nomad as environment variable when starting it up."
-    echo -e "--enable-consul-acl-token|Enable encryption of Consul ACL token."
-    echo -e "--enable-gossip-encryption|Enable encryption of gossip traffic between nodes."
-    echo -e "--enable-tls-encryption|Enable encryption of traffic between nodes."
     echo -e "--secrets-bucket-name|AWS S3 secrets bucket name."
     echo -e "--verify-server-hostname|When passed in, enable server hostname verification as part of RPC encryption."
     echo -e "--interface|Bind to interface."
@@ -304,21 +301,22 @@ function generate_nomad_config() {
   local -r config_dir="${2}"
   local -r plugin_dir="${3}"
   local -r user="${4}"
-  local -r enable_gossip_encryption="${5}"
-  local -r gossip_encryption_key="${6}"
-  local -r enable_consul_acl_token="${7}"
-  local -r consul_acl_token="${8}"
-  local -r enable_tls_encryption="${9}"
-  local -r ca_file_path="${10}"
-  local -r cert_file_path="${11}"
-  local -r key_file_path="${12}"
-  local -r consul_ca_file_path="${13}"
-  local -r consul_cert_file_path="${14}"
-  local -r consul_key_file_path="${15}"
-  local -r verify_server_hostname="${16}"
-  local -r verify_https_client="${17}"
-  local -r ipv6="${18}"
-  local -r interface="${19}"
+  local -r gossip_encryption_key="${5}"
+  local -r ca_file_path="${6}"
+  local -r cert_file_path="${7}"
+  local -r key_file_path="${8}"
+  local -r consul_ca_file_path="${9}"
+  local -r consul_cert_file_path="${10}"
+  local -r consul_key_file_path="${11}"
+  local -r consul_acl_token="${12}"
+  local -r vault_ca_file_path="${13}"
+  local -r vault_cert_file_path="${14}"
+  local -r vault_key_file_path="${15}"
+  local -r vault_token="${16}"
+  local -r verify_server_hostname="${17}"
+  local -r verify_https_client="${18}"
+  local -r ipv6="${19}"
+  local -r interface="${20}"
 
   local -r config_path="$config_dir/$NOMAD_CONFIG_FILE"
 
@@ -326,21 +324,14 @@ function generate_nomad_config() {
   local instance_region="${EC2_INSTANCE_REGION}"
   local availability_zone="${EC2_INSTANCE_AVAILABILITY_ZONE}"
   local instance_type="${EC2_INSTANCE_TYPE}"
-  local consul_port="8500"
 
   local server_config=""
-  local gossip_encryption_configuration=""
 
   local address
 
   address="$(get_nomad_address "${server}" "${ipv6}" "${interface}")"
 
   if [[ "$server" == "true" ]]; then
-    if [[ "$enable_gossip_encryption" == "true" && -n "$gossip_encryption_key" ]]; then
-      log_info "Creating gossip encryption configuration"
-      gossip_encryption_configuration="encrypt = \"$gossip_encryption_key\""
-    fi
-
     local instance_tags=""
     local cluster_size=""
 
@@ -356,7 +347,7 @@ acl {
 server {
   enabled = true
   bootstrap_expect = $cluster_size
-  $gossip_encryption_configuration
+  encrypt = "$gossip_encryption_key"
 
   default_scheduler_config {
     scheduler_algorithm             = "spread"
@@ -405,53 +396,25 @@ EOF
     )
   fi
 
-  local consul_acl_token_configuration=""
+  local vault_stanza=""
 
-  if [[ "$enable_consul_acl_token" == "true" && -n "$consul_acl_token" ]]; then
-    log_info "Creating Consul ACL configuration"
-    consul_acl_token_configuration="token = \"$consul_acl_token\""
-  fi
-
-  local tls_encryption_configuration=""
-  if [[ "$enable_tls_encryption" == "true" && -n "$ca_file_path" && -n "$cert_file_path" && -n "$key_file_path" ]]; then
-    log_info "Creating TLS encryption configuration"
-    tls_encryption_configuration=$(
+  if [[ "$server" == "true" ]]; then
+    vault_stanza=$(
       cat << EOF
-tls {
-  http = true
-  rpc  = true
-
-  ca_file   = "$ca_file_path"
-  cert_file = "$cert_file_path"
-  key_file  = "$key_file_path"
-
-  verify_server_hostname = $verify_server_hostname
-  verify_https_client    = $verify_https_client
-}
+  address          = "https://[::1]:8200"
+  token            = "$vault_token"
 EOF
     )
-  fi
-
-  local consul_tls_encryption_configuration=""
-
-  if [[ "$enable_tls_encryption" == "true" && -n "$consul_ca_file_path" && -n "$consul_cert_file_path" && -n "$consul_key_file_path" ]]; then
-    log_info "Creating Consul TLS encryption configuration"
-
-    consul_port="8501"
-
-    consul_tls_encryption_configuration=$(
+  else
+    vault_stanza=$(
       cat << EOF
-
-  ssl        = true
-  verify_ssl = true
-  ca_file    = "$consul_ca_file_path"
-  cert_file  = "$consul_cert_file_path"
-  key_file   = "$consul_key_file_path"
+  address          = "https://vault.service.consul:8200"
 EOF
     )
   fi
 
   log_info "Creating default Nomad config file in $config_path"
+
   cat > "$config_path" << EOF
 plugin_dir = "${plugin_dir}"
 datacenter = "$availability_zone"
@@ -474,7 +437,17 @@ $client_config
 
 $server_config
 
-$tls_encryption_configuration
+tls {
+  http = true
+  rpc  = true
+
+  ca_file   = "$ca_file_path"
+  cert_file = "$cert_file_path"
+  key_file  = "$key_file_path"
+
+  verify_server_hostname = $verify_server_hostname
+  verify_https_client    = $verify_https_client
+}
 
 telemetry {
   publish_allocation_metrics = true
@@ -485,10 +458,23 @@ telemetry {
 }
 
 consul {
-  address = "[::1]:${consul_port}"
+  address = "[::1]:8501"
 
-  $consul_acl_token_configuration
-  $consul_tls_encryption_configuration
+  ssl        = true
+  verify_ssl = true
+  ca_file    = "$consul_ca_file_path"
+  cert_file  = "$consul_cert_file_path"
+  key_file   = "$consul_key_file_path"
+  token      = "$consul_acl_token"
+}
+
+vault {
+  enabled          = true
+  ca_path          = "$vault_ca_file_path"
+  cert_file        = "$vault_cert_file_path"
+  key_file         = "$vault_key_file_path"
+  create_from_role = "nomad-cluster"
+$vault_stanza
 }
 EOF
   chown "$user:$user" "$config_path"
@@ -588,10 +574,12 @@ After=consul-online.target
 After=docker.service
 After=ferm.service
 After=network-online.target
+After=vault-online.target
 Wants=consul-online.target
 Wants=docker.service
 Wants=ferm.service
 Wants=network-online.target
+Wants=vault-online.target
 ConditionFileNotEmpty=$config_path
 
 EOF
@@ -676,12 +664,9 @@ function run() {
   local server="false"
   local environment=()
 
-  local enable_gossip_encryption="false"
-  local enable_tls_encryption="false"
   local secrets_bucket_name=""
   local verify_server_hostname="false"
   local verify_https_client="false"
-  local enable_consul_acl_token="false"
 
   local ipv6="false"
   local interface="eth0"
@@ -699,15 +684,6 @@ function run() {
         assert_not_empty "$key" "$2"
         secrets_bucket_name="$2"
         shift
-        ;;
-      --enable-gossip-encryption)
-        enable_gossip_encryption="true"
-        ;;
-      --enable-consul-acl-token)
-        enable_consul_acl_token="true"
-        ;;
-      --enable-tls-encryption)
-        enable_tls_encryption="true"
         ;;
       --verify-server-hostname)
         verify_server_hostname="true"
@@ -770,10 +746,6 @@ function run() {
   assert_is_installed "jq"
   assert_is_installed "gomplate"
 
-  if [[ "$enable_tls_encryption" == "true" ]]; then
-    assert_is_installed "update-ca-trust"
-  fi
-
   local config_dir
   local plugin_dir
   local data_dir
@@ -794,8 +766,10 @@ function run() {
   local consul_cert_file_path=""
   local consul_key_file_path=""
 
-  local gossip_encryption_key=""
-  local consul_acl_token=""
+  local vault_ca_file_path=""
+  local vault_cert_file_path=""
+  local vault_key_file_path=""
+  local vault_token=""
 
   local type
 
@@ -805,77 +779,103 @@ function run() {
     type="client"
   fi
 
-  if [[ "$enable_gossip_encryption" == "true" ]]; then
+  local gossip_encryption_key=""
+
+  if [[ "$role" == "server" ]]; then
     gossip_encryption_key="$(get_object_value "${secrets_bucket_name}" "${role}/nomad/nomad-gossip-encryption-key")"
   fi
 
-  if [[ "$enable_consul_acl_token" == "true" ]]; then
-    consul_acl_token="$(get_object_value "${secrets_bucket_name}" "${role}/nomad/consul-acl-token-nomad-${type}")"
+  local consul_acl_token=""
+  consul_acl_token="$(get_object_value "${secrets_bucket_name}" "${role}/nomad/consul-acl-token-nomad-${type}")"
+
+  local vault_token=""
+
+  if [[ "$role" == "server" ]]; then
+    vault_token="$(get_object_value "${secrets_bucket_name}" "${role}/nomad/vault-token-nomad-server")"
   fi
 
-  if [[ "$enable_tls_encryption" == "true" ]]; then
-    local tls_path
-    local tls_ca_path
+  local tls_path
+  local tls_ca_path
 
-    tls_path="$(cd "$SCRIPT_DIR/../tls" && pwd)"
-    tls_ca_path="$(cd "$SCRIPT_DIR/../tls/ca" && pwd)"
+  tls_path="$(cd "$SCRIPT_DIR/../tls" && pwd)"
+  tls_ca_path="$(cd "$SCRIPT_DIR/../tls/ca" && pwd)"
 
-    nomad_ca_file_path="${tls_ca_path}/nomad-ca.pem"
-    nomad_cert_file_path="${tls_path}/nomad-${type}.pem"
-    nomad_key_file_path="${tls_path}/nomad-${type}-key.pem"
+  nomad_ca_file_path="${tls_ca_path}/nomad-ca.pem"
+  nomad_cert_file_path="${tls_path}/nomad-${type}.pem"
+  nomad_key_file_path="${tls_path}/nomad-${type}-key.pem"
 
-    get_object "${secrets_bucket_name}" \
-      "${role}/nomad/nomad-ca.pem" \
-      "${nomad_ca_file_path}" \
-      "${user}"
+  get_object "${secrets_bucket_name}" \
+    "${role}/nomad/nomad-ca.pem" \
+    "${nomad_ca_file_path}" \
+    "${user}"
 
-    get_object "${secrets_bucket_name}" \
-      "${role}/nomad/nomad-${type}.pem" \
-      "${nomad_cert_file_path}" \
-      "${user}"
+  get_object "${secrets_bucket_name}" \
+    "${role}/nomad/nomad-${type}.pem" \
+    "${nomad_cert_file_path}" \
+    "${user}"
 
-    get_object "${secrets_bucket_name}" \
-      "${role}/nomad/nomad-${type}-key.pem" \
-      "${nomad_key_file_path}" \
-      "${user}"
+  get_object "${secrets_bucket_name}" \
+    "${role}/nomad/nomad-${type}-key.pem" \
+    "${nomad_key_file_path}" \
+    "${user}"
 
-    # Consul TLS
-    consul_ca_file_path="${tls_ca_path}/consul-ca.pem"
-    consul_cert_file_path="${tls_path}/consul-nomad.pem"
-    consul_key_file_path="${tls_path}/consul-nomad-key.pem"
+  # Consul TLS
+  consul_ca_file_path="${tls_ca_path}/consul-ca.pem"
+  consul_cert_file_path="${tls_path}/consul-nomad.pem"
+  consul_key_file_path="${tls_path}/consul-nomad-key.pem"
 
-    get_object "${secrets_bucket_name}" \
-      "${role}/nomad/consul-ca.pem" \
-      "${consul_ca_file_path}" \
-      "${user}"
+  get_object "${secrets_bucket_name}" \
+    "${role}/nomad/consul-ca.pem" \
+    "${consul_ca_file_path}" \
+    "${user}"
 
-    get_object "${secrets_bucket_name}" \
-      "${role}/nomad/consul-nomad.pem" \
-      "${consul_cert_file_path}" \
-      "${user}"
+  get_object "${secrets_bucket_name}" \
+    "${role}/nomad/consul-nomad.pem" \
+    "${consul_cert_file_path}" \
+    "${user}"
 
-    get_object "${secrets_bucket_name}" \
-      "${role}/nomad/consul-nomad-key.pem" \
-      "${consul_key_file_path}" \
-      "${user}"
-  fi
+  get_object "${secrets_bucket_name}" \
+    "${role}/nomad/consul-nomad-key.pem" \
+    "${consul_key_file_path}" \
+    "${user}"
+
+  # Vault TLS
+  vault_ca_file_path="${tls_ca_path}/vault-ca.pem"
+  vault_cert_file_path="${tls_path}/vault-nomad.pem"
+  vault_key_file_path="${tls_path}/vault-nomad-key.pem"
+
+  get_object "${secrets_bucket_name}" \
+    "${role}/nomad/vault-ca.pem" \
+    "${vault_ca_file_path}" \
+    "${user}"
+
+  get_object "${secrets_bucket_name}" \
+    "${role}/nomad/vault-nomad.pem" \
+    "${vault_cert_file_path}" \
+    "${user}"
+
+  get_object "${secrets_bucket_name}" \
+    "${role}/nomad/vault-nomad-key.pem" \
+    "${vault_key_file_path}" \
+    "${user}"
 
   generate_nomad_config \
     "$server" \
     "$config_dir" \
     "$plugin_dir" \
     "$user" \
-    "$enable_gossip_encryption" \
     "$gossip_encryption_key" \
-    "$enable_consul_acl_token" \
-    "$consul_acl_token" \
-    "$enable_tls_encryption" \
     "$nomad_ca_file_path" \
     "$nomad_cert_file_path" \
     "$nomad_key_file_path" \
     "$consul_ca_file_path" \
     "$consul_cert_file_path" \
     "$consul_key_file_path" \
+    "$consul_acl_token" \
+    "$vault_ca_file_path" \
+    "$vault_cert_file_path" \
+    "$vault_key_file_path" \
+    "$vault_token" \
     "$verify_server_hostname" \
     "$verify_https_client" \
     "$ipv6" \
