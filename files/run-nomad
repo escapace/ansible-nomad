@@ -86,10 +86,6 @@ function print_usage() {
     echo -e "--ipv6|Use IPv6."
   )"
   echo
-  echo "Example:"
-  echo
-  echo "  $SCRIPT_NAME --server"
-  echo
 }
 
 function log() {
