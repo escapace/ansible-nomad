@@ -464,7 +464,7 @@ function restart_services {
     services+=("nomad.service")
   fi
 
-  systemctl restart "${services[@]}"
+  systemctl --no-block restart "${services[@]}"
 }
 
 function write_nomad_udev_rule {

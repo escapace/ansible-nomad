@@ -623,7 +623,7 @@ function start_nomad() {
 
   sudo systemctl daemon-reload
   sudo systemctl enable nomad.service
-  sudo systemctl restart ferm.service nomad.service
+  sudo systemctl --no-block restart ferm.service nomad.service
 }
 
 # Based on: http://unix.stackexchange.com/a/7732/215969
