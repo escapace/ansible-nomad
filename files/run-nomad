@@ -403,6 +403,7 @@ EOF
       cat << EOF
   address          = "https://[::1]:8200"
   token            = "$vault_token"
+  create_from_role = "nomad-cluster"
 EOF
     )
   else
@@ -473,7 +474,6 @@ vault {
   ca_path          = "$vault_ca_file_path"
   cert_file        = "$vault_cert_file_path"
   key_file         = "$vault_key_file_path"
-  create_from_role = "nomad-cluster"
 $vault_stanza
 }
 EOF
