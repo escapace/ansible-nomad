@@ -4,3 +4,4 @@
 - name: nomad daemon-reload
   ansible.builtin.systemd:
     daemon_reload: true
+  when: not nomad_role_debug|bool
