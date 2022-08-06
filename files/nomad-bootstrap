@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+
+set -e
+set -u
+set -o pipefail
+
+set -o allexport
+source "/etc/sysconfig/ec2-environment"
+set +o allexport
+
+SCRIPT_NAME=
+SCRIPT_NAME="$(basename "$0")"
+
+readonly NOMAD_CA_FILE="/opt/nomad/tls/ca/nomad-ca.pem"
+NOMAD_CERT_FILE=
+NOMAD_KEY_FILE=
+
+if [[ -f "/opt/nomad/tls/nomad-server.pem" ]]; then
+  NOMAD_CERT_FILE="/opt/nomad/tls/nomad-server.pem"
+else
+  NOMAD_CERT_FILE="/opt/nomad/tls/nomad-client.pem"
+fi
+
+if [[ -f "/opt/nomad/tls/nomad-server-key.pem" ]]; then
+  NOMAD_KEY_FILE="/opt/nomad/tls/nomad-server-key.pem"
+else
+  NOMAD_KEY_FILE="/opt/nomad/tls/nomad-client-key.pem"
+fi
+
+if [[ -z "${SECRETS_BUCKET_NAME}" ]]; then
+  exit 1
+fi
+
+if [[ -z "${ADDRESS}" ]]; then
+  exit 1
+fi
+
+function log() {
+  local -r level="$1"
+  local -r message="$2"
+  local -r timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+  echo >&2 -e "${timestamp} [${level}] [$SCRIPT_NAME] ${message}"
+}
+
+function log_info() {
+  local -r message="$1"
+  log "INFO" "$message"
+}
+
+function api() {
+  curl -s -k -f \
+    –cacert "${NOMAD_CA_FILE}" \
+    –cert "${NOMAD_CERT_FILE}" \
+    –key "${NOMAD_KEY_FILE}" \
+    "https://[::1]:4646${1}"
+}
+
+function get_object_value() {
+  local -r source="$1"
+
+  local -r key="${EC2_INSTANCE_REGION}/${source}"
+
+  log_info "Downloading ${key}"
+
+  aws s3 cp --quiet \
+    "s3://${SECRETS_BUCKET_NAME}/${key}" /dev/stdout || exit 1
+}
+
+function policy_exists() {
+  nomad acl policy info "$1" &> /dev/null || return 1
+}
+
+function policy_apply() {
+  local name="${1}"
+
+  if ! policy_exists "${name}"; then
+    local content
+    content="$(get_object_value "server/nomad/nomad-acl-policy-${name}.hcl")"
+    echo "${content}" | nomad acl policy apply "${name}" -
+  fi
+}
+
+function configure() {
+  policy_apply "operator"
+
+  log_info "Policies applied."
+}
+
+function is_leader() {
+  local leader
+
+  leader="$(api "/v1/status/leader")"
+
+  if [[ "${leader}" =~ .*"$ADDRESS".* ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+function nomad_bootstrap() {
+  local token
+
+  token=$(get_object_value "server/nomad/nomad-acl-token-nomad-initial-management")
+
+  export NOMAD_TOKEN="${token}"
+  export NOMAD_ADDR="https://[::1]:4646"
+
+  if ! nomad status &> /dev/null; then
+    if is_leader; then
+      echo "${token}" | nomad acl bootstrap -
+      configure
+    else
+      log_info "Not the leader: '${leader}' does not match '${ADDRESS}'."
+    fi
+  else
+    log_info "ACL bootstrap already done."
+
+    if is_leader; then
+      configure
+    fi
+  fi
+}
+
+nomad_bootstrap

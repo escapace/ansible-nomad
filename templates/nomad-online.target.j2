@@ -1,0 +1,13 @@
+[Unit]
+Description=Nomad Online
+Requires=nomad-online.service
+After=nomad-online.service
+Requires=nomad.service
+After=nomad.service
+{% if nomad_server | bool is true %}
+Requires=nomad-bootstrap.service
+After=nomad-bootstrap.service
+{% endif %}
+
+[Install]
+WantedBy=multi-user.target

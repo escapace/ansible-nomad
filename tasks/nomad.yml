@@ -134,8 +134,33 @@
 - include_tasks: storage-setup.yml
   when: (storage_setup_physical_device is defined) and (storage_setup_physical_device | length > 0) and (nomad_volume|bool)
 
+- name: copy nomad-online script
+  ansible.builtin.copy:
+    src: nomad-online
+    dest: /opt/nomad/bin/nomad-online
+    mode: 0750
+    owner: nomad
+    group: nomad
+
+- name: create nomad-online service
+  ansible.builtin.template: src=templates/nomad-online.service.j2 dest=/usr/lib/systemd/system/nomad-online.service owner=root group=root mode=0644
+  notify:
+    - nomad daemon-reload
+
+- name: create nomad-online target
+  ansible.builtin.template: src=templates/nomad-online.target.j2 dest=/usr/lib/systemd/system/nomad-online.target owner=root group=root mode=0644
+  notify:
+    - nomad daemon-reload
+
 - include_tasks: nomad-client.yml
   when: nomad_server | bool is false
   tags:
     - run-nomad-network
     - ferm-conf
+
+- include_tasks: nomad-server.yml
+  when: nomad_server | bool is true
+  tags:
+    - run-nomad-network
+    - ferm-conf
+    - nomad-bootstrap

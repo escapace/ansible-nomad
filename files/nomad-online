@@ -4,17 +4,26 @@ set -e
 set -u
 set -o pipefail
 
-set -o allexport
-source "/etc/sysconfig/ec2-environment"
-set +o allexport
-
-readonly NOMAD_CA_FILE="/opt/nomad/tls/ca/consul-ca.pem"
-readonly NOMAD_CERT_FILE="/opt/nomad/tls/consul-nomad.pem"
-readonly NOMAD_KEY_FILE="/opt/nomad/tls/consul-nomad-key.pem"
 readonly NOMAD_MIN_PEERS="2"
 
+readonly NOMAD_CA_FILE="/opt/nomad/tls/ca/nomad-ca.pem"
+NOMAD_CERT_FILE=
+NOMAD_KEY_FILE=
+
+if [[ -f "/opt/nomad/tls/nomad-server.pem" ]]; then
+  NOMAD_CERT_FILE="/opt/nomad/tls/nomad-server.pem"
+else
+  NOMAD_CERT_FILE="/opt/nomad/tls/nomad-client.pem"
+fi
+
+if [[ -f "/opt/nomad/tls/nomad-server-key.pem" ]]; then
+  NOMAD_KEY_FILE="/opt/nomad/tls/nomad-server-key.pem"
+else
+  NOMAD_KEY_FILE="/opt/nomad/tls/nomad-client-key.pem"
+fi
+
 function api() {
-  curl -s -k \
+  curl -s -k -f \
     –cacert "${NOMAD_CA_FILE}" \
     –cert "${NOMAD_CERT_FILE}" \
     –key "${NOMAD_KEY_FILE}" \
@@ -22,8 +31,7 @@ function api() {
 }
 
 function nomad_check_peers() {
-  if [[ "$(api "/v1/status/peers" | jq -r '.|length' 2>/dev/null)" -ge "${NOMAD_MIN_PEERS}" ]]
-  then
+  if [[ "$(api "/v1/status/peers" | jq -r '.|length' 2> /dev/null)" -ge "${NOMAD_MIN_PEERS}" ]]; then
     true
   else
     return 1
@@ -31,7 +39,6 @@ function nomad_check_peers() {
 }
 
 function nomad_online() {
-  nomad_check_has_leader
   nomad_check_peers
 }
 

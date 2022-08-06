@@ -14,6 +14,7 @@ SCRIPT_NAME="$(basename "$0")"
 
 readonly NOMAD_CONFIG_FILE="default.hcl"
 readonly SYSTEMD_CONFIG_PATH="/usr/lib/systemd/system/nomad.service"
+readonly NOMAD_BOOTSTRAP_SYSTEMD_CONFIG_PATH="/etc/systemd/system/nomad-bootstrap.service.d/010-environment.conf"
 readonly AWS_ASG_TAG_KEY="aws:autoscaling:groupName"
 readonly MAX_RETRIES=30
 readonly SLEEP_BETWEEN_RETRIES_SEC=10
@@ -522,7 +523,7 @@ domain ({{ (ds "data").domain }}) table filter chain INPUT saddr {{ (ds "data").
   proto tcp dport 4647 ACCEPT;
 }
 
-{{ if bool ((ds "data").server) }}
+{{ if conv.ToBool ((ds "data").server) }}
 domain ({{ (ds "data").domain }}) table filter chain INPUT saddr {{ (ds "data").vpc_cidr }} daddr {{ (ds "data").address }} {
   # The port used for the gossip protocol for cluster membership. Both TCP
   # and UDP should be routable between the server nodes on this port.
@@ -546,14 +547,17 @@ EOF
 function generate_systemd_config() {
   umask 022
 
-  local -r systemd_config_path="${1}"
+  local -r nomad_bin_dir="${1}"
   local -r nomad_config_dir="${2}"
   local -r nomad_data_dir="${3}"
-  local -r nomad_bin_dir="${4}"
-  local nomad_user="${5}"
-  local -r use_sudo="${6}"
+  local -r interface="${4}"
+  local -r ipv6="${5}"
+  local -r secrets_bucket_name="${6}"
+  local -r server="${7}"
+  local -r use_sudo="${8}"
+  local nomad_user="${9}"
 
-  shift 6
+  shift 9
 
   local -r environment=("$@")
   local -r config_path="$nomad_config_dir/$NOMAD_CONFIG_FILE"
@@ -563,7 +567,7 @@ function generate_systemd_config() {
     nomad_user="root"
   fi
 
-  log_info "Creating systemd config file to run Nomad in $systemd_config_path"
+  log_info "Creating systemd config file to run Nomad in $SYSTEMD_CONFIG_PATH"
 
   local -r unit_config=$(
     cat << EOF
@@ -613,17 +617,35 @@ WantedBy=multi-user.target
 EOF
   )
 
-  echo -e "$unit_config" > "$systemd_config_path"
-  echo -e "$service_config" >> "$systemd_config_path"
-  echo -e "$install_config" >> "$systemd_config_path"
+  echo -e "$unit_config" > "$SYSTEMD_CONFIG_PATH"
+  echo -e "$service_config" >> "$SYSTEMD_CONFIG_PATH"
+  echo -e "$install_config" >> "$SYSTEMD_CONFIG_PATH"
+
+  if [[ "$server" == "true" ]]; then
+    log_info "Creating systemd bootstrap config file ${NOMAD_BOOTSTRAP_SYSTEMD_CONFIG_PATH}"
+
+    local address
+
+    address="$(get_nomad_address "${server}" "${ipv6}" "${interface}")"
+
+    local -r bootstrap_config=$(
+      cat << EOF
+[Service]
+Environment='SECRETS_BUCKET_NAME=${secrets_bucket_name}'
+Environment='ADDRESS=${address}'
+
+EOF
+    )
+    echo -e "$bootstrap_config" > "${NOMAD_BOOTSTRAP_SYSTEMD_CONFIG_PATH}"
+  fi
 }
 
 function start_nomad() {
   log_info "Reloading systemd config and starting Nomad"
 
   sudo systemctl daemon-reload
-  sudo systemctl enable nomad.service
-  sudo systemctl --no-block restart ferm.service nomad.service
+  sudo systemctl enable nomad-online.target
+  sudo systemctl --no-block restart ferm.service nomad-online.target
 }
 
 # Based on: http://unix.stackexchange.com/a/7732/215969
@@ -882,12 +904,15 @@ function run() {
     "$interface"
 
   generate_systemd_config \
-    "$SYSTEMD_CONFIG_PATH" \
+    "$bin_dir" \
     "$config_dir" \
     "$data_dir" \
-    "$bin_dir" \
-    "$user" \
+    "$interface" \
+    "$ipv6" \
+    "$secrets_bucket_name" \
+    "$server" \
     "$use_sudo" \
+    "$user" \
     "${environment[@]}"
 
   generate_ferm_config \
