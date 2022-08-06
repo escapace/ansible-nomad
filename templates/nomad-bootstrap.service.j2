@@ -1,0 +1,14 @@
+[Unit]
+Description="Nomad Bootstrap"
+ConditionFileNotEmpty=/opt/nomad/config/default.hcl
+After=nomad.service
+Requires=nomad.service
+After=nomad-online.service
+Requires=nomad-online.service
+Before=nomad-online.target
+
+[Service]
+Type=oneshot
+User=nomad
+Group=nomad
+ExecStart=/opt/nomad/bin/nomad-bootstrap

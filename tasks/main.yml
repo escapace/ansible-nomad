@@ -6,3 +6,4 @@
     - ferm-conf
     - run-nomad
     - run-nomad-network
+    - nomad-bootstrap

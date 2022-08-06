@@ -1,0 +1,14 @@
+[Unit]
+Description="Nomad Online"
+ConditionFileNotEmpty=/opt/nomad/config/default.hcl
+Requires=nomad.service
+After=nomad.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=nomad
+Group=nomad
+ExecStart=retry /opt/nomad/bin/nomad-online
+Environment=RETRY_MAX_ATTEMPTS=0
