@@ -196,13 +196,7 @@ function get_nomad_address() {
   local variable_reference
 
   type="$(address_type "${ipv6}")"
-
-  # if [[ "${server}" == "false" && -v "EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_ADDRESS" ]]
-  # then
-  #   variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_ADDRESS"
-  # else
   variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_ADDRESS"
-  # fi
 
   echo "${!variable_reference}"
 }
@@ -217,20 +211,6 @@ function get_vpc_cidr() {
   type="$(address_type "${ipv6}")"
 
   variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_VPC_CIDR"
-
-  echo "${!variable_reference}"
-}
-
-function get_prefix_cidr() {
-  local -r ipv6="${1}"
-  local -r interface="${2}"
-
-  local type
-  local variable_reference
-
-  type="$(address_type "${ipv6}")"
-
-  variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_CIDR"
 
   echo "${!variable_reference}"
 }
@@ -492,7 +472,6 @@ function generate_ferm_config() {
 
   local address
   local domain
-  local prefix_cidr=""
   local vpc_cidr
 
   if [[ "$ipv6" == "true" ]]; then
@@ -503,10 +482,6 @@ function generate_ferm_config() {
 
   address="$(get_nomad_address "${server}" "${ipv6}" "${interface}")"
   vpc_cidr="$(get_vpc_cidr "${ipv6}" "${interface}")"
-
-  if [[ "$server" == "false" ]]; then
-    prefix_cidr="$(get_prefix_cidr "${ipv6}" "${interface}")"
-  fi
 
   local -r template=$(
     cat << EOF
@@ -537,7 +512,7 @@ domain ({{ (ds "data").domain }}) table filter chain INPUT saddr {{ (ds "data").
 EOF
   )
 
-  echo "{ \"server\": ${server}, \"domain\": \"${domain}\", \"address\": \"${address}\", \"vpc_cidr\": \"${vpc_cidr}\", \"prefix_cidr\": \"${prefix_cidr}\" }" | jq '.' | gomplate \
+  echo "{ \"server\": ${server}, \"domain\": \"${domain}\", \"address\": \"${address}\", \"vpc_cidr\": \"${vpc_cidr}\" }" | jq '.' | gomplate \
     -i "${template}" -d data=stdin:///data.json > "${template_path}"
 
   chown root:root "${template_path}"
