@@ -9,8 +9,8 @@ umask 027
 SCRIPT_NAME=
 SCRIPT_NAME="$(basename "$0")"
 
-# TODO: parametrize this
-readonly NOMAD_BRIDGE_NETWORK_SUBNET="172.26.64.0/20"
+readonly CNI_NOMAD_SUBNET="172.26.64.0/20"
+readonly CNI_VPC_SUBNET="172.26.48.0/20"
 
 function print_usage() {
   echo
@@ -24,8 +24,6 @@ function print_usage() {
   echo -e "  --prefix-interface\tSecondary interface."
   echo -e "  --enable-metadata\tWhether the metadata service is accessible."
 }
-
-# echo -e "  --install\tInstall nomad-network service."
 
 function log() {
   local readonly level="$1"
@@ -80,38 +78,16 @@ function get_address() {
   echo "${!variable_reference}"
 }
 
-# function get_prefix_address {
-#   local -r type="${1}"
-#   local -r interface="${2}"
-#
-#   local variable_reference
-#
-#   variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_ADDRESS"
-#
-#   echo "${!variable_reference}"
-# }
+function get_vpc_cidr() {
+  local -r type="${1}"
+  local -r interface="${2}"
 
-# function get_prefix_length {
-#   local -r type="${1}"
-#   local -r interface="${2}"
-#
-#   local variable_reference
-#
-#   variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_LENGTH"
-#
-#   echo "${!variable_reference}"
-# }
+  local variable_reference
 
-# function get_vpc_cidr {
-#   local -r type="${1}"
-#   local -r interface="${2}"
-#
-#   local variable_reference
-#
-#   variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_VPC_CIDR"
-#
-#   echo "${!variable_reference}"
-# }
+  variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_VPC_CIDR"
+
+  echo "${!variable_reference}"
+}
 
 function get_prefix_cidr() {
   local -r type="${1}"
@@ -124,27 +100,32 @@ function get_prefix_cidr() {
   echo "${!variable_reference}"
 }
 
-function write_prefix_cni_conf() {
-  local -r interface="${1}"
+function configure_vpc() {
+  local -r primary_interface="${1}"
+  local -r interface="${2}"
   local -r kresd_directory_path="/etc/knot-resolver/kresd.conf.d"
   local -r ferm_directory_path="/etc/ferm/ferm.d"
   local -r template_path="/opt/cni/config/vpc.conflist"
   local -r resolv_conf_path="/opt/cni/run/vpc-resolv.conf"
 
-  local ipv4_subnet
+  local vpc_ipv6_cidr
+  vpc_ipv6_cidr="$(get_vpc_cidr "ipv6" "${interface}")"
+
   local ipv6_subnet
-  ipv4_subnet="$(get_prefix_cidr "ipv4" "${interface}")"
   ipv6_subnet="$(get_prefix_cidr "ipv6" "${interface}")"
 
-  local ipv4_address
   local ipv6_address
-  ipv4_address="$(get_address "ipv4" "${interface}")"
   ipv6_address="$(get_address "ipv6" "${interface}")"
+
+  local dns_ipv4_address
+  local dns_ipv6_address
+  dns_ipv4_address="$(get_address "ipv4" "${primary_interface}")"
+  dns_ipv6_address="$(get_address "ipv6" "${primary_interface}")"
 
   local -r resolv_conf=$(
     cat << EOF
-nameserver ${ipv4_address}
-nameserver ${ipv6_address}
+nameserver ${dns_ipv4_address}
+nameserver ${dns_ipv6_address}
 
 EOF
   )
@@ -156,38 +137,43 @@ EOF
   "name": "vpc",
   "plugins": [
     {
+      "type": "ptp-eth1",
+      "ipMasq": true,
+      "ipam": {
+        "type": "host-local",
+        "subnet": "${CNI_VPC_SUBNET}",
+        "dataDir": "/var/run/cni/vpc-ptp",
+        "routes": [
+          {
+            "dst": "0.0.0.0/0"
+          }
+        ]
+      },
+      "dns": {
+        "nameservers": ["${dns_ipv4_address}", "${dns_ipv6_address}"]
+      }
+    },
+    {
       "type": "ipvlan",
-      "master": "{{ (ds "data").interface }}",
+      "master": "${interface}",
       "mode": "l3s",
       "ipam": {
         "type": "host-local",
-        "resolvConf": "{{ (ds "data").resolv_conf_path }}",
-        "dataDir": "/var/run/cni",
+        "resolvConf": "${resolv_conf_path}",
+        "dataDir": "/var/run/cni/vpc-ipvlan",
         "ranges": [
           [
             {
-              "subnet": "{{ (ds "data").ipv4_subnet }}"
-            }
-          ],
-          [
-            {
-              "subnet": "{{ (ds "data").ipv6_subnet }}"
+              "subnet": "${ipv6_subnet}"
             }
           ]
         ],
         "routes": [
           {
             "dst": "::/0"
-          },
-          {
-            "dst": "0.0.0.0/0"
           }
         ]
       }
-    },
-    {
-      "type": "firewall",
-      "backend": "iptables"
     }
   ]
 }
@@ -197,8 +183,7 @@ EOF
 
   log_info "${template_path}: cni/vpc configuration."
 
-  echo "{ \"interface\": \"${interface}\", \"ipv4_subnet\": \"${ipv4_subnet}\", \"ipv6_subnet\": \"${ipv6_subnet}\", \"resolv_conf_path\": \"${resolv_conf_path}\" }" | jq -M '.' | gomplate \
-    -i "${template}" -d data=stdin:///data.json | jq -M '.' > "${template_path}"
+  echo "${template}" | jq -M '.' > "${template_path}"
 
   chown root:root "${template_path}"
   chmod 644 "${template_path}"
@@ -209,24 +194,42 @@ EOF
   chown root:root "${resolv_conf_path}"
   chmod 644 "${resolv_conf_path}"
 
-  ## Ferm
-
   if [[ -d "${ferm_directory_path}" ]]; then
-    local -r ferm_interface_dns_conf_path="${ferm_directory_path}/1020-${interface}-dns.conf"
+    local -r ferm_interface_dns_conf_path="${ferm_directory_path}/1030-interface-${interface}.conf"
 
     local -r ferm_interface_dns_conf=$(
       cat << EOF
-domain ip table filter {
-  chain INPUT daddr ${ipv4_address} proto (udp tcp) dport 53 {
-    interface ${interface} saddr ${ipv4_subnet} ACCEPT;
+domain ip6 {
+  table filter {
+    chain (INPUT FORWARD) {
+      saddr ${ipv6_subnet} daddr ${dns_ipv6_address} proto (udp tcp) dport 53 ACCEPT;
+    }
+
+    chain (INPUT) {
+      saddr ${vpc_ipv6_cidr} daddr ${ipv6_subnet} ACCEPT;
+    }
   }
 }
 
-domain ip6 table filter {
-  chain INPUT daddr ${ipv6_address} proto (udp tcp) dport 53 {
-    interface ${interface} saddr ${ipv6_subnet} ACCEPT;
+domain ip {
+  table filter {
+    chain (INPUT FORWARD) {
+      saddr $CNI_VPC_SUBNET daddr ${dns_ipv4_address} proto (udp tcp) dport 53 ACCEPT;
+    }
+
+    chain FORWARD {
+      saddr $CNI_VPC_SUBNET outerface ${primary_interface} ACCEPT;
+      mod state state (ESTABLISHED RELATED) daddr $CNI_VPC_SUBNET ACCEPT;
+    }
+  }
+
+  table nat {
+    chain POSTROUTING {
+      saddr ${CNI_VPC_SUBNET} outerface ${primary_interface} MASQUERADE;
+    }
   }
 }
+
 EOF
     )
 
@@ -239,28 +242,13 @@ EOF
   fi
 
   if [[ -d "${kresd_directory_path}" ]]; then
-    local -r kresd_network_interface_conf_path="${kresd_directory_path}/410-network-${interface}.conf"
-    local -r kresd_view_interface_conf_path="${kresd_directory_path}/920-view-${interface}-self.conf"
-
-    local -r kresd_network_interface_conf=$(
-      cat << EOF
-net.listen('${ipv4_address}', 53, { kind = 'dns', freebind = true })
-net.listen('${ipv6_address}', 53, { kind = 'dns', freebind = true })
-EOF
-    )
-
-    log_info "${kresd_network_interface_conf_path}: knot-resolver configuration."
-
-    echo -e "$kresd_network_interface_conf" > "$kresd_network_interface_conf_path"
-    chown root:knot-resolver "$kresd_network_interface_conf_path"
-    chmod 640 "$kresd_network_interface_conf_path"
+    local -r kresd_view_interface_conf_path="${kresd_directory_path}/920-view-${interface}.conf"
 
     local -r kresd_view_interface_conf=$(
       cat << EOF
-view:addr('${ipv4_address}', policy.all(policy.PASS))
 view:addr('${ipv6_address}', policy.all(policy.PASS))
-view:addr('${ipv4_subnet}', policy.all(policy.PASS))
 view:addr('${ipv6_subnet}', policy.all(policy.PASS))
+view:addr('${CNI_VPC_SUBNET}', policy.all(policy.PASS))
 EOF
     )
 
@@ -272,12 +260,10 @@ EOF
   fi
 }
 
-function write_nomad_dns_conf() {
+function configure_nomad() {
   # TODO: https://github.com/hashicorp/nomad/issues/11102
 
   local -r interface="${1}"
-  local -r nomad_bridge_network_subnet="${NOMAD_BRIDGE_NETWORK_SUBNET}"
-
   local -r docker_drop_in_directory_path="/etc/systemd/system/docker.service.d"
   local -r kresd_directory_path="/etc/knot-resolver/kresd.conf.d"
   local -r ferm_directory_path="/etc/ferm/ferm.d"
@@ -327,7 +313,7 @@ EOF
       cat << EOF
 view:addr('${ipv4_address}', policy.all(policy.PASS))
 view:addr('${ipv6_address}', policy.all(policy.PASS))
-view:addr('${nomad_bridge_network_subnet}', policy.all(policy.PASS))
+view:addr('${CNI_NOMAD_SUBNET}', policy.all(policy.PASS))
 EOF
     )
 
@@ -339,13 +325,13 @@ EOF
   fi
 
   if [[ -d "${ferm_directory_path}" ]]; then
-    local -r ferm_nomad_dns_conf_path="${ferm_directory_path}/1020-${interface}-dns.conf"
+    local -r ferm_nomad_dns_conf_path="${ferm_directory_path}/1030-interface-${interface}.conf"
 
     local -r ferm_nomad_dns_conf=$(
       cat << EOF
 domain ip table filter {
   chain INPUT daddr ${ipv4_address} proto (udp tcp) dport 53 {
-    interface nomad saddr ${nomad_bridge_network_subnet} ACCEPT;
+    interface nomad saddr ${CNI_NOMAD_SUBNET} ACCEPT;
   }
 }
 EOF
@@ -360,11 +346,10 @@ EOF
   fi
 }
 
-function write_nomad_metadata_conf() {
+function configure_nomad_metadata() {
   local -r enable_metadata="${1}"
-  local -r nomad_bridge_network_subnet="${NOMAD_BRIDGE_NETWORK_SUBNET}"
   local -r ferm_directory_path="/etc/ferm/ferm.d"
-  local -r ferm_nomad_metadata_conf_path="${ferm_directory_path}/1020-nomad-metadata.conf"
+  local -r ferm_nomad_metadata_conf_path="${ferm_directory_path}/1020-interface-nomad-metadata.conf"
 
   local policy="DROP"
 
@@ -377,7 +362,7 @@ function write_nomad_metadata_conf() {
       cat << EOF
 domain ip table filter {
   chain NOMAD-ADMIN daddr 169.254.169.254 proto tcp dport 80 {
-    interface nomad saddr ${nomad_bridge_network_subnet} ${policy};
+    interface nomad saddr ${CNI_NOMAD_SUBNET} ${policy};
   }
 }
 EOF
@@ -392,15 +377,13 @@ EOF
   fi
 }
 
-function write_prefix_metadata_conf() {
+function configure_vpc_metadata() {
   local -r enable_metadata="${1}"
   local -r interface="${2}"
   local -r ferm_directory_path="/etc/ferm/ferm.d"
-  local -r ferm_nomad_metadata_conf_path="${ferm_directory_path}/1020-${interface}-metadata.conf"
+  local -r ferm_nomad_metadata_conf_path="${ferm_directory_path}/1020-interface-${interface}-metadata.conf"
 
-  local prefix_ipv4_subnet
   local prefix_ipv6_subnet
-  prefix_ipv4_subnet="$(get_prefix_cidr "ipv4" "${interface}")"
   prefix_ipv6_subnet="$(get_prefix_cidr "ipv6" "${interface}")"
 
   local policy="DROP"
@@ -413,8 +396,8 @@ function write_prefix_metadata_conf() {
     local -r ferm_nomad_metadata_conf=$(
       cat << EOF
 domain (ip ip6) table filter {
-  chain OUTPUT daddr (169.254.169.254 fd00:ec2::254) proto tcp dport 80 {
-    saddr ${prefix_ipv4_subnet} ${policy};
+  chain (INPUT FORWARD OUTPUT) daddr (169.254.169.254 fd00:ec2::254) proto tcp dport 80 {
+    saddr ${CNI_VPC_SUBNET} ${policy};
     saddr ${prefix_ipv6_subnet} ${policy};
   }
 }
@@ -452,26 +435,10 @@ EOF
   )
 
   echo "{ \"interface\": \"${interface}\", \"has_prefix\": ${has_prefix} }" | jq -M '.' | gomplate \
-    -i "${template}" -d data=stdin:///data.json | jq -M '.' > "$environment_drop_in_path"
+    -i "${template}" -d data=stdin:///data.json > "$environment_drop_in_path"
 
   chown root:root "${environment_drop_in_path}"
   chmod 644 "${environment_drop_in_path}"
-}
-
-contains() {
-  local seeking=$1
-  shift
-  local in=1
-  local element
-
-  for element; do
-    if [[ $element == "$seeking" ]]; then
-      in=0
-      break
-    fi
-  done
-
-  return $in
 }
 
 function restart_services() {
@@ -498,28 +465,9 @@ function restart_services() {
   systemctl --no-block restart "${services[@]}"
 }
 
-# function write_nomad_udev_rule {
-#   local -r nomad_udev_rule_path="/etc/udev/rules.d/80-nomad.rules"
-#   local -r nomad_udev_rule=$(cat <<EOF
-# SUBSYSTEM=="net", ACTION=="add", ENV{ID_NET_DRIVER}=="bridge", ENV{INTERFACE}=="nomad", RUN+="/sbin/ip link set nomad promisc on"
-# EOF
-# )
-#
-#   log_info "${nomad_udev_rule_path}: enable promiscuous mode on nomad bridge."
-#
-#   echo -e "$nomad_udev_rule" > "$nomad_udev_rule_path"
-#   chown root:root "$nomad_udev_rule_path"
-#   chmod 644 "$nomad_udev_rule_path"
-#
-#   if ip link show dev nomad &> /dev/null
-#   then
-#     ip link set nomad promisc on
-#   fi
-# }
-
 function run() {
   local interface="eth0"
-  local prefix_interface="eth0"
+  local prefix_interface="eth1"
   local enable_metadata="false"
 
   while [[ $# > 0 ]]; do
@@ -575,14 +523,69 @@ function run() {
   source "/etc/sysconfig/ec2-environment"
   set +o allexport
 
-  write_nomad_metadata_conf "${enable_metadata}"
-  write_nomad_dns_conf "${interface}"
+  configure_nomad "${interface}"
+  configure_nomad_metadata "${enable_metadata}"
 
-  write_prefix_cni_conf "${prefix_interface}"
-  write_prefix_metadata_conf "${enable_metadata}" "${prefix_interface}"
+  configure_vpc "${interface}" "${prefix_interface}"
+  configure_vpc_metadata "${enable_metadata}" "${prefix_interface}"
 
-  # write_nomad_udev_rule
   restart_services
 }
 
 run "$@"
+
+# function write_nomad_udev_rule {
+#   local -r nomad_udev_rule_path="/etc/udev/rules.d/80-nomad.rules"
+#   local -r nomad_udev_rule=$(cat <<EOF
+# SUBSYSTEM=="net", ACTION=="add", ENV{ID_NET_DRIVER}=="bridge", ENV{INTERFACE}=="nomad", RUN+="/sbin/ip link set nomad promisc on"
+# EOF
+# )
+#
+#   log_info "${nomad_udev_rule_path}: enable promiscuous mode on nomad bridge."
+#
+#   echo -e "$nomad_udev_rule" > "$nomad_udev_rule_path"
+#   chown root:root "$nomad_udev_rule_path"
+#   chmod 644 "$nomad_udev_rule_path"
+#
+#   if ip link show dev nomad &> /dev/null
+#   then
+#     ip link set nomad promisc on
+#   fi
+# }
+
+# function get_prefix_address {
+#   local -r type="${1}"
+#   local -r interface="${2}"
+#
+#   local variable_reference
+#
+#   variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_ADDRESS"
+#
+#   echo "${!variable_reference}"
+# }
+
+# function get_prefix_length {
+#   local -r type="${1}"
+#   local -r interface="${2}"
+#
+#   local variable_reference
+#
+#   variable_reference="EC2_INSTANCE_${interface^^}_${type^^}_PREFIX_LENGTH"
+#
+#   echo "${!variable_reference}"
+# }
+
+#     local -r kresd_network_interface_conf_path="${kresd_directory_path}/410-network-${interface}.conf"
+#     local -r kresd_network_interface_conf=$(
+#       cat << EOF
+# net.listen('${ipv4_address}', 53, { kind = 'dns', freebind = true })
+# net.listen('${ipv6_address}', 53, { kind = 'dns', freebind = true })
+# EOF
+#     )
+#
+#     log_info "${kresd_network_interface_conf_path}: knot-resolver configuration."
+#
+#     echo -e "$kresd_network_interface_conf" > "$kresd_network_interface_conf_path"
+#     chown root:knot-resolver "$kresd_network_interface_conf_path"
+#     chmod 640 "$kresd_network_interface_conf_path"
+
