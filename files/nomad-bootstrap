@@ -111,7 +111,7 @@ function nomad_bootstrap() {
       echo "${token}" | nomad acl bootstrap -
       configure
     else
-      log_info "Not the leader: '${leader}' does not match '${ADDRESS}'."
+      log_info "Not the leader."
     fi
   else
     log_info "ACL bootstrap already done."
