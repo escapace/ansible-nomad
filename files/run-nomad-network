@@ -423,11 +423,11 @@ function setup_environment() {
   local -r template=$(
     cat << EOF
 [Service]
-Environment=EXPECT_IPV4_${interface^^}=true
-Environment=EXPECT_IPV6_${interface^^}=true
-
 {{ if conv.ToBool ((ds "data").has_prefix) }}
 Environment=EXPECT_IPV6_PREFIX_${interface^^}=true
+{{ else }}
+Environment=EXPECT_IPV6_${interface^^}=true
+Environment=EXPECT_IPV4_${interface^^}=true
 {{ end }}
 
 EOF
