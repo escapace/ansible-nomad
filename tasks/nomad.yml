@@ -131,7 +131,7 @@
     state: "absent"
   changed_when: false
 
-- include_tasks: storage-setup.yml
+- ansible.builtin.include_tasks: storage-setup.yml
   when: (storage_setup_physical_device is defined) and (storage_setup_physical_device | length > 0) and (nomad_volume|bool)
 
 - name: copy nomad-online script
@@ -152,13 +152,13 @@
   notify:
     - nomad daemon-reload
 
-- include_tasks: nomad-client.yml
+- ansible.builtin.include_tasks: nomad-client.yml
   when: nomad_server | bool is false
   tags:
     - run-nomad-network
     - ferm-conf
 
-- include_tasks: nomad-server.yml
+- ansible.builtin.include_tasks: nomad-server.yml
   when: nomad_server | bool is true
   tags:
     - run-nomad-network
