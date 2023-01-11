@@ -440,14 +440,15 @@ telemetry {
 }
 
 consul {
-  address = "[::1]:8501"
+  address      = "[::1]:8501"
+  grpc_address = "[::1]:8502"
 
-  ssl        = true
-  verify_ssl = true
-  ca_file    = "$consul_ca_file_path"
-  cert_file  = "$consul_cert_file_path"
-  key_file   = "$consul_key_file_path"
-  token      = "$consul_acl_token"
+  ssl          = true
+  verify_ssl   = true
+  ca_file      = "$consul_ca_file_path"
+  cert_file    = "$consul_cert_file_path"
+  key_file     = "$consul_key_file_path"
+  token        = "$consul_acl_token"
 }
 
 vault {
