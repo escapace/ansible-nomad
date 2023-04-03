@@ -11,7 +11,12 @@
     - nomad-bootstrap
 
 - name: create nomad-bootstrap service
-  ansible.builtin.template: src=templates/nomad-bootstrap.service.j2 dest=/usr/lib/systemd/system/nomad-bootstrap.service owner=root group=root mode=0644
+  ansible.builtin.template:
+    src: templates/nomad-bootstrap.service.j2
+    dest: /usr/lib/systemd/system/nomad-bootstrap.service
+    owner: root
+    group: root
+    mode: 0644
   notify:
     - nomad daemon-reload
 

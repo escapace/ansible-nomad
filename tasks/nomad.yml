@@ -143,12 +143,22 @@
     group: nomad
 
 - name: create nomad-online service
-  ansible.builtin.template: src=templates/nomad-online.service.j2 dest=/usr/lib/systemd/system/nomad-online.service owner=root group=root mode=0644
+  ansible.builtin.template:
+    src: templates/nomad-online.service.j2
+    dest: /usr/lib/systemd/system/nomad-online.service
+    owner: root
+    group: root
+    mode: 0644
   notify:
     - nomad daemon-reload
 
 - name: create nomad-online target
-  ansible.builtin.template: src=templates/nomad-online.target.j2 dest=/usr/lib/systemd/system/nomad-online.target owner=root group=root mode=0644
+  ansible.builtin.template:
+    src: templates/nomad-online.target.j2
+    dest: /usr/lib/systemd/system/nomad-online.target
+    owner: root
+    group: root
+    mode: 0644
   notify:
     - nomad daemon-reload
 
