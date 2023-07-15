@@ -123,7 +123,7 @@ function configure_vpc() {
   dns_ipv6_address="$(get_address "ipv6" "${primary_interface}")"
 
   local -r resolv_conf=$(
-    cat << EOF
+    cat <<EOF
 nameserver ${dns_ipv4_address}
 nameserver ${dns_ipv6_address}
 
@@ -131,7 +131,7 @@ EOF
   )
 
   local -r template=$(
-    cat << EOF
+    cat <<EOF
 {
   "cniVersion": "0.4.0",
   "name": "vpc",
@@ -174,6 +174,69 @@ EOF
           }
         ]
       }
+    },
+    {
+      "type": "tuning",
+      "sysctl": {
+        "net.core.somaxconn": "32768",
+        "net.ipv4.conf.IFNAME.accept_redirects": "0",
+        "net.ipv4.conf.IFNAME.accept_source_route": "0",
+        "net.ipv4.conf.IFNAME.log_martians": "1",
+        "net.ipv4.conf.IFNAME.rp_filter": "2",
+        "net.ipv4.conf.IFNAME.secure_redirects": "1",
+        "net.ipv4.conf.IFNAME.send_redirects": "0",
+        "net.ipv4.conf.all.forwarding": "0",
+        "net.ipv4.conf.default.accept_redirects": "0",
+        "net.ipv4.conf.default.accept_source_route": "0",
+        "net.ipv4.conf.default.forwarding": "0",
+        "net.ipv4.conf.default.log_martians": "1",
+        "net.ipv4.conf.default.rp_filter": "2",
+        "net.ipv4.conf.default.secure_redirects": "1",
+        "net.ipv4.conf.default.send_redirects": "0",
+        "net.ipv4.icmp_echo_ignore_broadcasts": "1",
+        "net.ipv4.icmp_ignore_bogus_error_responses": "1",
+        "net.ipv4.ip_forward": "0",
+        "net.ipv4.tcp_adv_win_scale": "-2",
+        "net.ipv4.tcp_fastopen": "3",
+        "net.ipv4.tcp_fin_timeout": "10",
+        "net.ipv4.tcp_keepalive_intvl": "30",
+        "net.ipv4.tcp_keepalive_probes": "6",
+        "net.ipv4.tcp_keepalive_time": "120",
+        "net.ipv4.tcp_max_syn_backlog": "8192",
+        "net.ipv4.tcp_max_tw_buckets": "2000000",
+        "net.ipv4.tcp_mtu_probing": "1",
+        "net.ipv4.tcp_notsent_lowat": "131072",
+        "net.ipv4.tcp_rfc1337": "1",
+        "net.ipv4.tcp_rmem": "8192 262144 536870912",
+        "net.ipv4.tcp_slow_start_after_idle": "0",
+        "net.ipv4.tcp_syncookies": "1",
+        "net.ipv4.tcp_wmem": "4096 16384 536870912",
+        "net.ipv4.udp_rmem_min": "8192",
+        "net.ipv4.udp_wmem_min": "8192",
+        "net.ipv6.conf.IFNAME.accept_dad": "0",
+        "net.ipv6.conf.IFNAME.accept_ra": "0",
+        "net.ipv6.conf.IFNAME.accept_redirects": "0",
+        "net.ipv6.conf.IFNAME.accept_redirects": "0",
+        "net.ipv6.conf.IFNAME.accept_source_route": "0",
+        "net.ipv6.conf.IFNAME.autoconf": "0",
+        "net.ipv6.conf.IFNAME.forwarding": "0",
+        "net.ipv6.conf.IFNAME.router_solicitations": "0",
+        "net.ipv6.conf.IFNAME.drop_unsolicited_na": "1",
+        "net.ipv6.conf.IFNAME.use_oif_addrs_only": "1",
+        "net.ipv6.conf.IFNAME.use_tempaddr": "0",
+        "net.ipv6.conf.all.accept_ra": "0",
+        "net.ipv6.conf.all.accept_redirects": "0",
+        "net.ipv6.conf.all.accept_source_route": "0",
+        "net.ipv6.conf.all.autoconf": "0",
+        "net.ipv6.conf.all.forwarding": "0",
+        "net.ipv6.conf.default.accept_ra": "0",
+        "net.ipv6.conf.default.accept_redirects": "0",
+        "net.ipv6.conf.default.accept_redirects": "0",
+        "net.ipv6.conf.default.accept_source_route": "0",
+        "net.ipv6.conf.default.autoconf": "0",
+        "net.ipv6.conf.default.forwarding": "0",
+        "net.ipv6.conf.default.router_solicitations": "0"
+      }
     }
   ]
 }
@@ -183,14 +246,14 @@ EOF
 
   log_info "${template_path}: cni/vpc configuration."
 
-  echo "${template}" | jq -M '.' > "${template_path}"
+  echo "${template}" | jq -M '.' >"${template_path}"
 
   chown root:root "${template_path}"
   chmod 644 "${template_path}"
 
   log_info "${resolv_conf_path}: cni/vpc dns configuration."
 
-  echo -e "$resolv_conf" > "$resolv_conf_path"
+  echo -e "$resolv_conf" >"$resolv_conf_path"
   chown root:root "${resolv_conf_path}"
   chmod 644 "${resolv_conf_path}"
 
@@ -198,7 +261,7 @@ EOF
     local -r ferm_interface_dns_conf_path="${ferm_directory_path}/1030-interface-${interface}.conf"
 
     local -r ferm_interface_dns_conf=$(
-      cat << EOF
+      cat <<EOF
 domain ip6 {
   table filter {
     chain (INPUT FORWARD) {
@@ -235,7 +298,7 @@ EOF
 
     log_info "${ferm_interface_dns_conf_path}: cni/vpc dns configuration."
 
-    echo -e "$ferm_interface_dns_conf" > "$ferm_interface_dns_conf_path"
+    echo -e "$ferm_interface_dns_conf" >"$ferm_interface_dns_conf_path"
 
     chown root:root "$ferm_interface_dns_conf_path"
     chmod 600 "$ferm_interface_dns_conf_path"
@@ -245,7 +308,7 @@ EOF
     local -r kresd_view_interface_conf_path="${kresd_directory_path}/920-view-${interface}.conf"
 
     local -r kresd_view_interface_conf=$(
-      cat << EOF
+      cat <<EOF
 view:addr('${ipv6_address}', policy.all(policy.PASS))
 view:addr('${ipv6_subnet}', policy.all(policy.PASS))
 view:addr('${CNI_VPC_SUBNET}', policy.all(policy.PASS))
@@ -254,7 +317,7 @@ EOF
 
     log_info "${kresd_view_interface_conf_path}: knot-resolver configuration."
 
-    echo -e "$kresd_view_interface_conf" > "$kresd_view_interface_conf_path"
+    echo -e "$kresd_view_interface_conf" >"$kresd_view_interface_conf_path"
     chown root:knot-resolver "$kresd_view_interface_conf_path"
     chmod 640 "$kresd_view_interface_conf_path"
   fi
@@ -278,7 +341,7 @@ function configure_nomad() {
     local -r docker_drop_in_path="${docker_drop_in_directory_path}/050-dns-override.conf"
 
     local -r docker_drop_in=$(
-      cat << EOF
+      cat <<EOF
 [Service]
 Environment='DOCKER_DNS_OPTIONS=--dns ${ipv4_address} --dns ${ipv6_address}'
 
@@ -286,7 +349,7 @@ EOF
     )
     log_info "$docker_drop_in_path: docker dns configuration."
 
-    echo -e "$docker_drop_in" > "$docker_drop_in_path"
+    echo -e "$docker_drop_in" >"$docker_drop_in_path"
 
     chown root:root "${docker_drop_in_path}"
     chmod 644 "${docker_drop_in_path}"
@@ -297,7 +360,7 @@ EOF
     local -r kresd_view_nomad_conf_path="${kresd_directory_path}/920-view-${interface}.conf"
 
     local -r kresd_network_interface_conf=$(
-      cat << EOF
+      cat <<EOF
 net.listen('${ipv4_address}', 53, { kind = 'dns', freebind = true })
 net.listen('${ipv6_address}', 53, { kind = 'dns', freebind = true })
 EOF
@@ -305,12 +368,12 @@ EOF
 
     log_info "${kresd_network_interface_conf_path}: knot-resolver configuration."
 
-    echo -e "$kresd_network_interface_conf" > "$kresd_network_interface_conf_path"
+    echo -e "$kresd_network_interface_conf" >"$kresd_network_interface_conf_path"
     chown root:knot-resolver "$kresd_network_interface_conf_path"
     chmod 640 "$kresd_network_interface_conf_path"
 
     local -r kresd_view_nomad_conf=$(
-      cat << EOF
+      cat <<EOF
 view:addr('${ipv4_address}', policy.all(policy.PASS))
 view:addr('${ipv6_address}', policy.all(policy.PASS))
 view:addr('${CNI_NOMAD_SUBNET}', policy.all(policy.PASS))
@@ -319,7 +382,7 @@ EOF
 
     log_info "${kresd_view_nomad_conf_path}: knot-resolver configuration."
 
-    echo -e "$kresd_view_nomad_conf" > "$kresd_view_nomad_conf_path"
+    echo -e "$kresd_view_nomad_conf" >"$kresd_view_nomad_conf_path"
     chown root:knot-resolver "$kresd_view_nomad_conf_path"
     chmod 640 "$kresd_view_nomad_conf_path"
   fi
@@ -328,7 +391,7 @@ EOF
     local -r ferm_nomad_dns_conf_path="${ferm_directory_path}/1030-interface-${interface}.conf"
 
     local -r ferm_nomad_dns_conf=$(
-      cat << EOF
+      cat <<EOF
 domain ip table filter {
   chain INPUT daddr ${ipv4_address} proto (udp tcp) dport 53 {
     interface nomad saddr ${CNI_NOMAD_SUBNET} ACCEPT;
@@ -339,7 +402,7 @@ EOF
 
     log_info "${ferm_nomad_dns_conf_path}: nomad dns configuration."
 
-    echo -e "$ferm_nomad_dns_conf" > "$ferm_nomad_dns_conf_path"
+    echo -e "$ferm_nomad_dns_conf" >"$ferm_nomad_dns_conf_path"
 
     chown root:root "$ferm_nomad_dns_conf_path"
     chmod 600 "$ferm_nomad_dns_conf_path"
@@ -359,7 +422,7 @@ function configure_nomad_metadata() {
 
   if [[ -d "${ferm_directory_path}" ]]; then
     local -r ferm_nomad_metadata_conf=$(
-      cat << EOF
+      cat <<EOF
 domain ip table filter {
   chain NOMAD-ADMIN daddr 169.254.169.254 proto tcp dport 80 {
     interface nomad saddr ${CNI_NOMAD_SUBNET} ${policy};
@@ -370,7 +433,7 @@ EOF
 
     log_info "${ferm_nomad_metadata_conf_path}: instance metadata configuration."
 
-    echo -e "$ferm_nomad_metadata_conf" > "$ferm_nomad_metadata_conf_path"
+    echo -e "$ferm_nomad_metadata_conf" >"$ferm_nomad_metadata_conf_path"
 
     chown root:root "$ferm_nomad_metadata_conf_path"
     chmod 600 "$ferm_nomad_metadata_conf_path"
@@ -394,7 +457,7 @@ function configure_vpc_metadata() {
 
   if [[ -d "${ferm_directory_path}" ]]; then
     local -r ferm_nomad_metadata_conf=$(
-      cat << EOF
+      cat <<EOF
 domain (ip ip6) table filter {
   chain (INPUT FORWARD OUTPUT) daddr (169.254.169.254 fd00:ec2::254) proto tcp dport 80 {
     saddr ${CNI_VPC_SUBNET} ${policy};
@@ -406,7 +469,7 @@ EOF
 
     log_info "${ferm_nomad_metadata_conf_path}: instance metadata configuration."
 
-    echo -e "$ferm_nomad_metadata_conf" > "$ferm_nomad_metadata_conf_path"
+    echo -e "$ferm_nomad_metadata_conf" >"$ferm_nomad_metadata_conf_path"
 
     chown root:root "$ferm_nomad_metadata_conf_path"
     chmod 600 "$ferm_nomad_metadata_conf_path"
@@ -421,7 +484,7 @@ function setup_environment() {
   log_info "$environment_drop_in_path: ec2-environment systemd drop-in."
 
   local -r template=$(
-    cat << EOF
+    cat <<EOF
 [Service]
 {{ if conv.ToBool ((ds "data").has_prefix) }}
 Environment=EXPECT_IPV6_PREFIX_${interface^^}=true
@@ -434,7 +497,7 @@ EOF
   )
 
   echo "{ \"interface\": \"${interface}\", \"has_prefix\": ${has_prefix} }" | jq -M '.' | gomplate \
-    -i "${template}" -d data=stdin:///data.json > "$environment_drop_in_path"
+    -i "${template}" -d data=stdin:///data.json >"$environment_drop_in_path"
 
   chown root:root "${environment_drop_in_path}"
   chmod 644 "${environment_drop_in_path}"
@@ -445,19 +508,19 @@ function restart_services() {
 
   local services=()
 
-  if systemctl is-active 'kresd@*' &> /dev/null; then
+  if systemctl is-active 'kresd@*' &>/dev/null; then
     services+=("kresd@*")
   fi
 
-  if systemctl is-active ferm.service &> /dev/null; then
+  if systemctl is-active ferm.service &>/dev/null; then
     services+=("ferm.service")
   fi
 
-  if systemctl is-active docker.service &> /dev/null; then
+  if systemctl is-active docker.service &>/dev/null; then
     services+=("docker.service")
   fi
 
-  if systemctl is-active nomad.service &> /dev/null; then
+  if systemctl is-active nomad.service &>/dev/null; then
     services+=("nomad.service")
   fi
 
@@ -473,28 +536,28 @@ function run() {
     local key="$1"
 
     case "$key" in
-      --enable-metadata)
-        enable_metadata="true"
-        ;;
-      --interface)
-        assert_not_empty "$key" "$2"
-        interface="$2"
-        shift
-        ;;
-      --prefix-interface)
-        assert_not_empty "$key" "$2"
-        prefix_interface="$2"
-        shift
-        ;;
-      --help)
-        print_usage
-        exit
-        ;;
-      *)
-        log_error "Unrecognized argument: $key"
-        print_usage
-        exit 1
-        ;;
+    --enable-metadata)
+      enable_metadata="true"
+      ;;
+    --interface)
+      assert_not_empty "$key" "$2"
+      interface="$2"
+      shift
+      ;;
+    --prefix-interface)
+      assert_not_empty "$key" "$2"
+      prefix_interface="$2"
+      shift
+      ;;
+    --help)
+      print_usage
+      exit
+      ;;
+    *)
+      log_error "Unrecognized argument: $key"
+      print_usage
+      exit 1
+      ;;
     esac
 
     shift
@@ -587,4 +650,3 @@ run "$@"
 #     echo -e "$kresd_network_interface_conf" > "$kresd_network_interface_conf_path"
 #     chown root:knot-resolver "$kresd_network_interface_conf_path"
 #     chmod 640 "$kresd_network_interface_conf_path"
-
