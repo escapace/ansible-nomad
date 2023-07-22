@@ -82,6 +82,7 @@ function policy_apply() {
 
 function configure() {
   policy_apply "operator"
+  policy_apply "lambda-client-scale-in"
 
   log_info "Policies applied."
 }
