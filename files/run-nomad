@@ -36,15 +36,15 @@ function wrap() {
       width=$((cols - length - 4))
     fi
 
-    echo -e "${strings}" \
-      | fold -s -w "${width}" \
-      | sed -e "/--/! s|^| \||g" \
-      | column -t -s '|' \
-      | sed 's/^/  /'
+    echo -e "${strings}" |
+      fold -s -w "${width}" |
+      sed -e "/--/! s|^| \||g" |
+      column -t -s '|' |
+      sed 's/^/  /'
   else
     local lines
     local line
-    readarray -t lines <<< "${strings}"
+    readarray -t lines <<<"${strings}"
     local option
     local description
 
@@ -148,7 +148,7 @@ function get_object() {
   aws s3api get-object \
     --bucket "${secrets_bucket_name}" \
     --key "${key}" \
-    "${target}" > /dev/null || exit 1
+    "${target}" >/dev/null || exit 1
 
   chown "${user}:${user}" "${target}"
 }
@@ -278,33 +278,35 @@ function get_tag_value() {
 function generate_nomad_config() {
   umask 027
 
-  local -r server="${1}"
-  local -r config_dir="${2}"
-  local -r plugin_dir="${3}"
-  local -r user="${4}"
-  local -r gossip_encryption_key="${5}"
-  local -r ca_file_path="${6}"
-  local -r cert_file_path="${7}"
-  local -r key_file_path="${8}"
-  local -r consul_ca_file_path="${9}"
-  local -r consul_cert_file_path="${10}"
-  local -r consul_key_file_path="${11}"
-  local -r consul_acl_token="${12}"
-  local -r vault_ca_file_path="${13}"
-  local -r vault_cert_file_path="${14}"
-  local -r vault_key_file_path="${15}"
-  local -r vault_token="${16}"
-  local -r verify_server_hostname="${17}"
-  local -r verify_https_client="${18}"
-  local -r ipv6="${19}"
-  local -r interface="${20}"
+  local -r role="${1}"
+  local -r server="${2}"
+  local -r config_dir="${3}"
+  local -r plugin_dir="${4}"
+  local -r user="${5}"
+  local -r gossip_encryption_key="${6}"
+  local -r ca_file_path="${7}"
+  local -r cert_file_path="${8}"
+  local -r key_file_path="${9}"
+  local -r consul_ca_file_path="${10}"
+  local -r consul_cert_file_path="${11}"
+  local -r consul_key_file_path="${12}"
+  local -r consul_acl_token="${13}"
+  local -r vault_ca_file_path="${14}"
+  local -r vault_cert_file_path="${15}"
+  local -r vault_key_file_path="${16}"
+  local -r vault_token="${17}"
+  local -r verify_server_hostname="${18}"
+  local -r verify_https_client="${19}"
+  local -r ipv6="${20}"
+  local -r interface="${21}"
 
   local -r config_path="$config_dir/$NOMAD_CONFIG_FILE"
 
   local instance_id="${EC2_INSTANCE_ID}"
   local instance_region="${EC2_INSTANCE_REGION}"
-  local availability_zone="${EC2_INSTANCE_AVAILABILITY_ZONE}"
+  local instance_availability_zone="${EC2_INSTANCE_AVAILABILITY_ZONE}"
   local instance_type="${EC2_INSTANCE_TYPE}"
+  local instance_lifecycle="${EC2_INSTANCE_LIFECYCLE}"
 
   local server_config=""
 
@@ -320,7 +322,7 @@ function generate_nomad_config() {
     cluster_size=$(get_cluster_size "$instance_tags")
 
     server_config=$(
-      cat << EOF
+      cat <<EOF
 acl {
   enabled = true
 }
@@ -329,6 +331,13 @@ server {
   enabled = true
   bootstrap_expect = $cluster_size
   encrypt = "$gossip_encryption_key"
+  raft_multiplier = 1
+
+  plan_rejection_tracker {
+    enabled = true
+    node_threshold = 100
+    node_window = "3m"
+  }
 
   default_scheduler_config {
     scheduler_algorithm             = "spread"
@@ -350,13 +359,22 @@ EOF
   local client_config=""
   if [[ "$server" == "false" ]]; then
     client_config=$(
-      cat << EOF
+      cat <<EOF
 client {
   enabled = true
   network_interface = "${interface}"
   node_class = "${instance_type}"
   options = {
     "fingerprint.network.disallow_link_local" = "true"
+  }
+  bridge_network_hairpin_mode = true
+
+  meta {
+    availability_zone = "${instance_availability_zone}"
+    instance_id = "${instance_id}"
+    instance_lifecycle = "${instance_lifecycle}"
+    instance_type = "${instance_type}"
+    role = "${role}"
   }
 }
 
@@ -381,7 +399,7 @@ EOF
 
   if [[ "$server" == "true" ]]; then
     vault_stanza=$(
-      cat << EOF
+      cat <<EOF
   address          = "https://[::1]:8200"
   token            = "$vault_token"
   create_from_role = "nomad-cluster"
@@ -389,7 +407,7 @@ EOF
     )
   else
     vault_stanza=$(
-      cat << EOF
+      cat <<EOF
   address          = "https://vault.service.consul:8200"
 EOF
     )
@@ -397,11 +415,12 @@ EOF
 
   log_info "Creating default Nomad config file in $config_path"
 
-  cat > "$config_path" << EOF
-plugin_dir = "${plugin_dir}"
-datacenter = "$availability_zone"
-name       = "$instance_id"
-region     = "$instance_region"
+  cat >"$config_path" <<EOF
+log_level          = "WARN"
+plugin_dir         = "${plugin_dir}"
+datacenter         = "$instance_availability_zone"
+name               = "$instance_id"
+region             = "$instance_region"
 
 addresses {
   http = "127.0.0.1 ::1 ${address}"
@@ -485,7 +504,7 @@ function generate_ferm_config() {
   vpc_cidr="$(get_vpc_cidr "${ipv6}" "${interface}")"
 
   local -r template=$(
-    cat << EOF
+    cat <<EOF
 domain (ip ip6) table filter {
   chain OUTPUT {
     daddr (169.254.169.254 fd00:ec2::254) proto tcp mod owner uid-owner "nomad" ACCEPT;
@@ -514,7 +533,7 @@ EOF
   )
 
   echo "{ \"server\": ${server}, \"domain\": \"${domain}\", \"address\": \"${address}\", \"vpc_cidr\": \"${vpc_cidr}\" }" | jq '.' | gomplate \
-    -i "${template}" -d data=stdin:///data.json > "${template_path}"
+    -i "${template}" -d data=stdin:///data.json >"${template_path}"
 
   chown root:root "${template_path}"
   chmod 600 "${template_path}"
@@ -546,7 +565,7 @@ function generate_systemd_config() {
   log_info "Creating systemd config file to run Nomad in $SYSTEMD_CONFIG_PATH"
 
   local -r unit_config=$(
-    cat << EOF
+    cat <<EOF
 [Unit]
 Description="HashiCorp Nomad"
 Documentation=https://www.nomadproject.io/
@@ -566,7 +585,7 @@ EOF
   )
 
   local -r service_config=$(
-    cat << EOF
+    cat <<EOF
 [Service]
 User=$nomad_user
 Group=$nomad_user
@@ -587,15 +606,15 @@ EOF
   )
 
   local -r install_config=$(
-    cat << EOF
+    cat <<EOF
 [Install]
 WantedBy=multi-user.target
 EOF
   )
 
-  echo -e "$unit_config" > "$SYSTEMD_CONFIG_PATH"
-  echo -e "$service_config" >> "$SYSTEMD_CONFIG_PATH"
-  echo -e "$install_config" >> "$SYSTEMD_CONFIG_PATH"
+  echo -e "$unit_config" >"$SYSTEMD_CONFIG_PATH"
+  echo -e "$service_config" >>"$SYSTEMD_CONFIG_PATH"
+  echo -e "$install_config" >>"$SYSTEMD_CONFIG_PATH"
 
   if [[ "$server" == "true" ]]; then
     log_info "Creating systemd bootstrap config file ${NOMAD_BOOTSTRAP_SYSTEMD_CONFIG_PATH}"
@@ -605,14 +624,14 @@ EOF
     address="$(get_nomad_address "${server}" "${ipv6}" "${interface}")"
 
     local -r bootstrap_config=$(
-      cat << EOF
+      cat <<EOF
 [Service]
 Environment='SECRETS_BUCKET_NAME=${secrets_bucket_name}'
 Environment='ADDRESS=${address}'
 
 EOF
     )
-    echo -e "$bootstrap_config" > "${NOMAD_BOOTSTRAP_SYSTEMD_CONFIG_PATH}"
+    echo -e "$bootstrap_config" >"${NOMAD_BOOTSTRAP_SYSTEMD_CONFIG_PATH}"
   fi
 }
 
@@ -673,44 +692,44 @@ function run() {
     local key="$1"
 
     case "$key" in
-      --role)
-        assert_not_empty "$key" "$2"
-        role="$2"
-        shift
-        ;;
-      --secrets-bucket-name)
-        assert_not_empty "$key" "$2"
-        secrets_bucket_name="$2"
-        shift
-        ;;
-      --verify-server-hostname)
-        verify_server_hostname="true"
-        ;;
-      --verify-https-client)
-        verify_https_client="true"
-        ;;
-      --environment)
-        assert_not_empty "$key" "$2"
-        environment+=("$2")
-        shift
-        ;;
-      --ipv6)
-        ipv6="true"
-        ;;
-      --interface)
-        assert_not_empty "$key" "$2"
-        interface="$2"
-        shift
-        ;;
-      --help)
-        print_usage
-        exit
-        ;;
-      *)
-        log_error "Unrecognized argument: $key"
-        print_usage
-        exit 1
-        ;;
+    --role)
+      assert_not_empty "$key" "$2"
+      role="$2"
+      shift
+      ;;
+    --secrets-bucket-name)
+      assert_not_empty "$key" "$2"
+      secrets_bucket_name="$2"
+      shift
+      ;;
+    --verify-server-hostname)
+      verify_server_hostname="true"
+      ;;
+    --verify-https-client)
+      verify_https_client="true"
+      ;;
+    --environment)
+      assert_not_empty "$key" "$2"
+      environment+=("$2")
+      shift
+      ;;
+    --ipv6)
+      ipv6="true"
+      ;;
+    --interface)
+      assert_not_empty "$key" "$2"
+      interface="$2"
+      shift
+      ;;
+    --help)
+      print_usage
+      exit
+      ;;
+    *)
+      log_error "Unrecognized argument: $key"
+      print_usage
+      exit 1
+      ;;
     esac
 
     shift
@@ -858,6 +877,7 @@ function run() {
     "${user}"
 
   generate_nomad_config \
+    "$role" \
     "$server" \
     "$config_dir" \
     "$plugin_dir" \
@@ -898,7 +918,7 @@ function run() {
 
   trust-ca "$nomad_ca_file_path"
 
-  cat > "/etc/profile.d/nomad.sh" << EOF
+  cat >"/etc/profile.d/nomad.sh" <<EOF
 export NOMAD_ADDR=https://[::1]:4646
 EOF
 
