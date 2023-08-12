@@ -1,0 +1,11 @@
+[Unit]
+Description="Nomad Snapshot"
+ConditionFileNotEmpty=/opt/nomad/config/default.hcl
+After=nomad-online.target
+Wants=nomad-online.target
+
+[Service]
+Type=oneshot
+User=nomad
+Group=nomad
+ExecStart=retry /opt/nomad/bin/nomad-snapshot

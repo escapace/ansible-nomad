@@ -12,20 +12,8 @@ SCRIPT_NAME=
 SCRIPT_NAME="$(basename "$0")"
 
 readonly NOMAD_CA_FILE="/opt/nomad/tls/ca/nomad-ca.pem"
-NOMAD_CERT_FILE=
-NOMAD_KEY_FILE=
-
-if [[ -f "/opt/nomad/tls/nomad-server.pem" ]]; then
-  NOMAD_CERT_FILE="/opt/nomad/tls/nomad-server.pem"
-else
-  NOMAD_CERT_FILE="/opt/nomad/tls/nomad-client.pem"
-fi
-
-if [[ -f "/opt/nomad/tls/nomad-server-key.pem" ]]; then
-  NOMAD_KEY_FILE="/opt/nomad/tls/nomad-server-key.pem"
-else
-  NOMAD_KEY_FILE="/opt/nomad/tls/nomad-client-key.pem"
-fi
+readonly NOMAD_CERT_FILE="/opt/nomad/tls/nomad-server.pem"
+readonly NOMAD_KEY_FILE="/opt/nomad/tls/nomad-server-key.pem"
 
 if [[ -z "${SECRETS_BUCKET_NAME}" ]]; then
   exit 1

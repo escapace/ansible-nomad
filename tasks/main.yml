@@ -7,3 +7,4 @@
     - run-nomad
     - run-nomad-network
     - nomad-bootstrap
+    - nomad-snapshot

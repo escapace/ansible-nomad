@@ -15,6 +15,8 @@ SCRIPT_NAME="$(basename "$0")"
 readonly NOMAD_CONFIG_FILE="default.hcl"
 readonly SYSTEMD_CONFIG_PATH="/usr/lib/systemd/system/nomad.service"
 readonly NOMAD_BOOTSTRAP_SYSTEMD_CONFIG_PATH="/etc/systemd/system/nomad-bootstrap.service.d/010-environment.conf"
+readonly NOMAD_SNAPSHOT_SYSTEMD_CONFIG_PATH="/etc/systemd/system/nomad-snapshot.service.d/010-environment.conf"
+readonly NOMAD_SNAPSHOT_TIMER_SYSTEMD_CONFIG_PATH="/usr/lib/systemd/system/nomad-snapshot.timer"
 readonly AWS_ASG_TAG_KEY="aws:autoscaling:groupName"
 readonly MAX_RETRIES=30
 readonly SLEEP_BETWEEN_RETRIES_SEC=10
@@ -25,15 +27,17 @@ function wrap() {
   local length
   local cols
   local width
+  local sep="|"
 
   length="$(echo -n "${strings}" | awk -F '|' '{print $1}' | awk '{ print length }' | sort -n | tail -1)"
   cols="$(tput cols)"
+  local cols_minus_four="$((cols - 4))"
 
-  if [[ $(((cols - 4) / length)) -ge 2 ]]; then
-    if [[ $((cols - length - 4)) -ge 80 ]]; then
-      width=80
+  if [[ "$((cols_minus_four / length))" -ge 2 ]]; then
+    if [[ "$((cols - length - 4))" -ge 80 ]]; then
+      width="80"
     else
-      width=$((cols - length - 4))
+      width="$((cols - length - 4))"
     fi
 
     echo -e "${strings}" |
@@ -51,12 +55,12 @@ function wrap() {
     if [[ "${cols}" -ge 80 ]]; then
       width="78"
     else
-      width=$((cols - 2))
+      width="$((cols - 2))"
     fi
 
     for line in "${lines[@]}"; do
-      option="${line%%|*}"
-      description=${line#*|}
+      option="${line%%$sep*}"
+      description="${line#*$sep}"
 
       echo "${option}"
       echo
@@ -81,6 +85,7 @@ function print_usage() {
     echo -e "--secrets-bucket-name|AWS S3 secrets bucket name."
     echo -e "--verify-server-hostname|When passed in, enable server hostname verification as part of RPC encryption."
     echo -e "--interface|Bind to interface."
+    echo -e "--snapshot-on|Calendar event expression for consul snapsots."
     echo -e "--ipv6|Use IPv6."
   )"
   echo
@@ -556,8 +561,9 @@ function generate_systemd_config() {
   local -r server="${7}"
   local -r use_sudo="${8}"
   local nomad_user="${9}"
+  local -r snapshot_on="${10}"
 
-  shift 9
+  shift 10
 
   local -r environment=("$@")
   local -r config_path="$nomad_config_dir/$NOMAD_CONFIG_FILE"
@@ -637,15 +643,52 @@ Environment='ADDRESS=${address}'
 EOF
     )
     echo -e "$bootstrap_config" >"${NOMAD_BOOTSTRAP_SYSTEMD_CONFIG_PATH}"
+
+    # snapshot
+
+    log_info "Creating systemd snapshot config file ${NOMAD_SNAPSHOT_SYSTEMD_CONFIG_PATH}"
+
+    local -r snapshot_config=$(
+      cat <<EOF
+[Service]
+Environment='SECRETS_BUCKET_NAME=${secrets_bucket_name}'
+Environment='ADDRESS=${address}'
+
+EOF
+    )
+    echo -e "$snapshot_config" >"${NOMAD_SNAPSHOT_SYSTEMD_CONFIG_PATH}"
+
+    log_info "Creating systemd snapshot timer config file ${NOMAD_SNAPSHOT_TIMER_SYSTEMD_CONFIG_PATH}"
+
+    local -r snapshot_timer_config=$(
+      cat <<EOF
+[Unit]
+Description=nomad-snapshot timer
+Wants=nomad-online.target
+
+[Timer]
+OnCalendar=${snapshot_on}
+RandomizedDelaySec=60m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
+EOF
+    )
+
+    echo -e "$snapshot_timer_config" >"${NOMAD_SNAPSHOT_TIMER_SYSTEMD_CONFIG_PATH}"
   fi
+
+  umask 027
 }
 
 function start_nomad() {
   log_info "Reloading systemd config and starting Nomad"
 
   sudo systemctl daemon-reload
-  sudo systemctl enable nomad-online.target
-  sudo systemctl --no-block restart ferm.service nomad-online.target
+  sudo systemctl enable nomad-online.target nomad-snapshot.timer
+  sudo systemctl --no-block restart ferm.service nomad-online.target nomad-snapshot.timer
 }
 
 # Based on: http://unix.stackexchange.com/a/7732/215969
@@ -693,6 +736,8 @@ function run() {
   local ipv6="false"
   local interface="eth0"
 
+  local snapshot_on="*-*-* 04:00:00"
+
   while [[ $# > 0 ]]; do
     local key="$1"
 
@@ -700,6 +745,11 @@ function run() {
     --role)
       assert_not_empty "$key" "$2"
       role="$2"
+      shift
+      ;;
+    --snapshot-on)
+      assert_not_empty "$key" "$2"
+      snapshot_on="$2"
       shift
       ;;
     --secrets-bucket-name)
@@ -914,6 +964,7 @@ function run() {
     "$server" \
     "$use_sudo" \
     "$user" \
+    "$snapshot_on" \
     "${environment[@]}"
 
   generate_ferm_config \
