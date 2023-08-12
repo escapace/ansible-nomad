@@ -31,7 +31,7 @@ function api() {
 }
 
 function nomad_check_peers() {
-  if [[ "$(api "/v1/status/peers" | jq -r '.|length' 2> /dev/null)" -ge "${NOMAD_MIN_PEERS}" ]]; then
+  if [[ "$(api "/v1/status/peers" | jq -r '.|length' 2>/dev/null)" -ge "${NOMAD_MIN_PEERS}" ]]; then
     true
   else
     return 1
