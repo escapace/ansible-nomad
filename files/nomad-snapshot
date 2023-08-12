@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+
+set -e
+set -u
+set -o pipefail
+
+set -o allexport
+source "/etc/sysconfig/ec2-environment"
+set +o allexport
+
+readonly script_name="$(basename "$0")"
+readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly directory="$(cd "$script_dir/.." && pwd)"
+readonly nomad_ca_file="${directory}/tls/ca/nomad-ca.pem"
+readonly nomad_cert_file="${directory}/tls/nomad-server.pem"
+readonly nomad_key_file="${directory}/tls/nomad-server-key.pem"
+readonly snapshot_path="${directory}/snapshot"
+
+if [[ -z "${SECRETS_BUCKET_NAME}" ]]; then
+  exit 1
+fi
+
+if [[ -z "${ADDRESS}" ]]; then
+  exit 1
+fi
+
+function log() {
+  local -r level="$1"
+  local -r message="$2"
+  local -r timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+  echo >&2 -e "${timestamp} [${level}] [$script_name] ${message}"
+}
+
+function log_info() {
+  local -r message="$1"
+  log "INFO" "$message"
+}
+
+function api() {
+  curl -s -k -f \
+    –cacert "${nomad_ca_file}" \
+    –cert "${nomad_cert_file}" \
+    –key "${nomad_key_file}" \
+    "https://[::1]:4646${1}"
+}
+
+function get_object_value() {
+  local -r source="$1"
+
+  local -r key="${EC2_INSTANCE_REGION}/${source}"
+
+  log_info "Downloading ${key}"
+
+  aws s3 cp --quiet \
+    "s3://${SECRETS_BUCKET_NAME}/${key}" /dev/stdout || exit 1
+}
+
+function is_leader() {
+  local leader
+
+  leader="$(api "/v1/status/leader")"
+
+  if [[ "${leader}" =~ .*"$ADDRESS".* ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+function get_token() {
+  local token
+  token=$(get_object_value "server/nomad/nomad-acl-token-nomad-initial-management")
+
+  export NOMAD_TOKEN="${token}"
+  export NOMAD_ADDR="https://[::1]:4646"
+}
+
+function snapshot() {
+  nomad operator snapshot save "${snapshot_path}" &> /dev/null || return 1
+
+  chmod 600 "${snapshot_path}" || return 1
+
+  aws s3api put-object \
+    --tagging "instance-id=${EC2_INSTANCE_ID}" \
+    --bucket "${SECRETS_BUCKET_NAME}" \
+    --key "${EC2_INSTANCE_REGION}/server/nomad/snapshot/latest" \
+    --body "${snapshot_path}" &>/dev/null || return 1
+
+  rm -f "${snapshot_path}" &>/dev/null || true
+
+  log_info "nomad snapshot taken"
+}
+
+function main() {
+  get_token || return 1
+  is_leader || return 0
+  snapshot || {
+    log_error "unable to take nomad snapshot"
+    rm -f "${snapshot_path}" &>/dev/null
+    return 1
+  }
+}
+
+main
