@@ -67,7 +67,7 @@ function get_object_value() {
 }
 
 function policy_exists() {
-  nomad acl policy info "$1" &> /dev/null || return 1
+  nomad acl policy info "$1" &>/dev/null || return 1
 }
 
 function policy_apply() {
@@ -107,7 +107,7 @@ function nomad_bootstrap() {
   export NOMAD_TOKEN="${token}"
   export NOMAD_ADDR="https://[::1]:4646"
 
-  if ! nomad status &> /dev/null; then
+  if ! nomad status &>/dev/null; then
     if is_leader; then
       echo "${token}" | nomad acl bootstrap -
       configure
