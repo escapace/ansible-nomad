@@ -76,7 +76,7 @@ function get_token() {
 }
 
 function snapshot() {
-  nomad operator snapshot save "${snapshot_path}" &> /dev/null || return 1
+  nomad operator snapshot save "${snapshot_path}" &>/dev/null || return 1
 
   chmod 600 "${snapshot_path}" || return 1
 

@@ -684,11 +684,22 @@ EOF
 }
 
 function start_nomad() {
+  local role="$1"
+
   log_info "Reloading systemd config and starting Nomad"
 
   sudo systemctl daemon-reload
-  sudo systemctl enable nomad-online.target nomad-snapshot.timer
-  sudo systemctl --no-block restart ferm.service nomad-online.target nomad-snapshot.timer
+
+  if [[ "$role" == "server" ]]; then
+    sudo systemctl enable nomad-snapshot.timer
+  fi
+
+  sudo systemctl enable nomad-online.target
+  sudo systemctl --no-block restart ferm.service nomad-online.target
+
+  if [[ "$role" == "server" ]]; then
+    sudo systemctl --no-block restart nomad-snapshot.timer
+  fi
 }
 
 # Based on: http://unix.stackexchange.com/a/7732/215969
@@ -981,7 +992,7 @@ EOF
   chown "root:root" "/etc/profile.d/nomad.sh"
   chmod 644 "/etc/profile.d/nomad.sh"
 
-  start_nomad
+  start_nomad "$role"
 }
 
 run "$@"
