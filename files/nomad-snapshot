@@ -15,6 +15,8 @@ readonly nomad_ca_file="${directory}/tls/ca/nomad-ca.pem"
 readonly nomad_cert_file="${directory}/tls/nomad-server.pem"
 readonly nomad_key_file="${directory}/tls/nomad-server-key.pem"
 readonly snapshot_path="${directory}/snapshot"
+readonly keystore_directory="${directory}/data/server/keystore"
+readonly keystore_path="${directory}/keystore"
 
 if [[ -z "${SECRETS_BUCKET_NAME}" ]]; then
   exit 1
@@ -75,8 +77,15 @@ function get_token() {
   export NOMAD_ADDR="https://[::1]:4646"
 }
 
+function keystore() {
+  local files=()
+  readarray -t files < <(find "${keystore_directory}" -type f -name "*.nks.json" -exec realpath --relative-to "${keystore_directory}" {} \; 2>/dev/null)
+  tar -C "${keystore_directory}" -czf "${keystore_path}" ${files[*]}
+}
+
 function snapshot() {
   nomad operator snapshot save "${snapshot_path}" &>/dev/null || return 1
+  keystore || return 1
 
   chmod 600 "${snapshot_path}" || return 1
 
@@ -86,7 +95,13 @@ function snapshot() {
     --key "${EC2_INSTANCE_REGION}/server/nomad/snapshot/latest" \
     --body "${snapshot_path}" &>/dev/null || return 1
 
-  rm -f "${snapshot_path}" &>/dev/null || true
+  aws s3api put-object \
+    --tagging "instance-id=${EC2_INSTANCE_ID}" \
+    --bucket "${SECRETS_BUCKET_NAME}" \
+    --key "${EC2_INSTANCE_REGION}/server/nomad/snapshot/keystore" \
+    --body "${keystore_path}" &>/dev/null || return 1
+
+  rm -f "${snapshot_path}" "${keystore_path}" &>/dev/null || true
 
   log_info "nomad snapshot taken"
 }
@@ -96,7 +111,7 @@ function main() {
   is_leader || return 0
   snapshot || {
     log_error "unable to take nomad snapshot"
-    rm -f "${snapshot_path}" &>/dev/null
+    rm -f "${snapshot_path}" "${keystore_path}" &>/dev/null
     return 1
   }
 }

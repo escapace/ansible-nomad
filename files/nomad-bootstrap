@@ -14,6 +14,7 @@ SCRIPT_NAME="$(basename "$0")"
 readonly NOMAD_CA_FILE="/opt/nomad/tls/ca/nomad-ca.pem"
 readonly NOMAD_CERT_FILE="/opt/nomad/tls/nomad-server.pem"
 readonly NOMAD_KEY_FILE="/opt/nomad/tls/nomad-server-key.pem"
+readonly NOMAD_KEYSTORE="/opt/nomad/data/server/keystore"
 
 if [[ -z "${SECRETS_BUCKET_NAME}" ]]; then
   exit 1
@@ -51,7 +52,22 @@ function get_object_value() {
   log_info "Downloading ${key}"
 
   aws s3 cp --quiet \
-    "s3://${SECRETS_BUCKET_NAME}/${key}" /dev/stdout || exit 1
+    "s3://${SECRETS_BUCKET_NAME}/${key}" /dev/stdout || return 1
+}
+
+function keystore() {
+  local content
+  content="$(get_object_value "server/nomad/snapshot/keystore" | base64 || echo 'false')"
+
+  if [[ "${content}" != "false" ]]
+  then
+    mkdir -p "${NOMAD_KEYSTORE}"
+    chown nomad:nomad "${NOMAD_KEYSTORE}"
+    chmod 700 "${NOMAD_KEYSTORE}"
+    echo "${content}" | base64 -d | tar -zxf - --skip-old-files --group nomad --owner nomad --mode 600 -C "${NOMAD_KEYSTORE}"
+
+    log_info "Keystore restored."
+  fi
 }
 
 function policy_exists() {
@@ -69,6 +85,7 @@ function policy_apply() {
 }
 
 function configure() {
+  keystore
   policy_apply "operator"
   policy_apply "lambda-client-scale-in"
 
