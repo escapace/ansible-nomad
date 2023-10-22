@@ -1,6 +1,7 @@
 ---
 
-nomad_version: "1.6.1"
+# https://github.com/hashicorp/nomad
+nomad_version: "1.6.2"
 nomad_server: false
 nomad_volume: true
 nomad_volume_size: 45%VG
