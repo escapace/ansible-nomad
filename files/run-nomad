@@ -378,6 +378,8 @@ client {
     "fingerprint.network.disallow_link_local" = "true"
   }
   bridge_network_hairpin_mode = true
+  min_dynamic_port = 20000
+  max_dynamic_port = 32000
 
   meta {
     availability_zone = "${instance_availability_zone}"
@@ -470,7 +472,6 @@ telemetry {
 
 consul {
   address      = "[::1]:8501"
-  grpc_address = "[::1]:8502"
 
   ssl          = true
   verify_ssl   = true
