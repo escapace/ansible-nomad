@@ -373,6 +373,7 @@ EOF
 client {
   enabled = true
   network_interface = "${interface}"
+  max_kill_timeout="60s"
   node_class = "${instance_type}"
   options = {
     "fingerprint.network.disallow_link_local" = "true"
