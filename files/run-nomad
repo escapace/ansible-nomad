@@ -395,7 +395,17 @@ plugin "docker" {
   config {
     endpoint = "unix:///run/docker.sock"
 
+    extra_labels = ["job_name", "job_id", "task_group_name", "task_name", "namespace", "node_name", "node_id"]
     allow_privileged = true
+
+    logging {
+      type = "journald"
+
+      config = {
+        env-regex = "^NOMAD_"
+        labels-regex = "^com\\\.hashicorp\\\.nomad\\\."
+      }
+    }
 
     volumes {
       enabled      = true
