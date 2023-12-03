@@ -87,7 +87,7 @@ function policy_apply() {
 function configure() {
   keystore
   policy_apply "operator"
-  policy_apply "asg-hook-nomad-drain"
+  policy_apply "lambda-nomad-drain"
 
   log_info "Policies applied."
 }
