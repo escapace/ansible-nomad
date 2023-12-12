@@ -15,6 +15,9 @@ readonly NOMAD_CA_FILE="/opt/nomad/tls/ca/nomad-ca.pem"
 readonly NOMAD_CERT_FILE="/opt/nomad/tls/nomad-server.pem"
 readonly NOMAD_KEY_FILE="/opt/nomad/tls/nomad-server-key.pem"
 readonly NOMAD_KEYSTORE="/opt/nomad/data/server/keystore"
+readonly CONSUL_CA_FILE="/opt/nomad/tls/ca/nomad-ca.pem"
+
+export CONSUL_HTTP_ADDR="http://[::1]:8500"
 
 if [[ -z "${SECRETS_BUCKET_NAME}" ]]; then
   exit 1
@@ -23,6 +26,17 @@ fi
 if [[ -z "${ADDRESS}" ]]; then
   exit 1
 fi
+
+function contains() {
+  local json_array=$1
+  local string_to_check=$2
+
+  if echo "$json_array" | jq -e --arg str "$string_to_check" '.[] | select(. == $str)' >/dev/null; then
+    return 0
+  else
+    return 1
+  fi
+}
 
 function log() {
   local -r level="$1"
@@ -55,12 +69,93 @@ function get_object_value() {
     "s3://${SECRETS_BUCKET_NAME}/${key}" /dev/stdout || return 1
 }
 
+function has_consul_acl_auth_method() {
+  local name="${1}"
+
+  local value
+  value="$(consul acl auth-method list -format=json | jq -r ". | any(.Name == \"${name}\")")"
+
+  if [[ "${value}" == "true" ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+function has_consul_acl_binding_rule() {
+  local name="${1}"
+
+  local value
+  value="$(consul acl binding-rule list -format=json | jq -r ". | any(.AuthMethod == \"${name}\")")"
+
+  if [[ "${value}" == "true" ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+function consul_setup() {
+  # https://github.com/hashicorp-modules/terraform-consul-nomad-setup/tree/main
+  # https://developer.hashicorp.com/nomad/tutorials/integrate-consul/consul-acl
+
+  local consul_token
+  consul_token="$(get_object_value "server/consul/consul-acl-token-consul-initial-management")"
+
+  export CONSUL_HTTP_TOKEN="${consul_token}"
+
+  local consul_config
+
+  consul_config=$(
+    cat <<EOF
+{
+  "JWKSURL": "https://nomad.service.consul:4646/.well-known/jwks.json",
+  "JWKSCACert": \$jwks_ca_cert,
+  "JWTSupportedAlgs": ["RS256"],
+  "BoundAudiences": ["consul.service.consul"],
+  "ClaimMappings": {
+    "nomad_namespace": "nomad_namespace",
+    "nomad_job_id": "nomad_job_id",
+    "nomad_task": "nomad_task",
+    "nomad_service": "nomad_service"
+  }
+}
+EOF
+  )
+
+  consul_config="$(jq -n --arg jwks_ca_cert "$(cat "${CONSUL_CA_FILE}" | sed 's/\\n/\\\\n/g')" "${consul_config}")"
+
+  if ! has_consul_acl_auth_method "nomad-workloads"; then
+    echo "${consul_config}" | consul acl auth-method create \
+      -name 'nomad-workloads' \
+      -type jwt \
+      -description "JWT auth method for Nomad services and workloads" \
+      -format json \
+      -config -
+  fi
+
+  if ! has_consul_acl_binding_rule "nomad-workloads"; then
+    consul acl binding-rule create \
+      -method 'nomad-workloads' \
+      -description "Binding rule for services registered from Nomad" \
+      -bind-type service \
+      -bind-name '${value.nomad_service}' \
+      -selector '"nomad_service" in value'
+
+    consul acl binding-rule create \
+      -method 'nomad-workloads' \
+      -description "Binding rule for Nomad tasks" \
+      -bind-type role \
+      -bind-name 'nomad-tasks-${value.nomad_namespace}' \
+      -selector '"nomad_service" not in value'
+  fi
+}
+
 function keystore() {
   local content
   content="$(get_object_value "server/nomad/snapshot/keystore" | base64 || echo 'false')"
 
-  if [[ "${content}" != "false" ]]
-  then
+  if [[ "${content}" != "false" ]]; then
     mkdir -p "${NOMAD_KEYSTORE}"
     chown nomad:nomad "${NOMAD_KEYSTORE}"
     chmod 700 "${NOMAD_KEYSTORE}"
@@ -90,8 +185,13 @@ function configure() {
   policy_apply "lambda-nomad-drain"
 
   log_info "Policies applied."
+
+  consul_setup
+
+  log_info "Consul integration applied."
 }
 
+# TODO: fix the risks in this function
 function is_leader() {
   local leader
 

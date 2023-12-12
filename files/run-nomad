@@ -418,6 +418,33 @@ EOF
     )
   fi
 
+  local consul_stanza=""
+
+  if [[ "$server" == "true" ]]; then
+    consul_stanza=$(
+      cat <<EOF
+
+  service_auth_method = "nomad-workloads"
+  task_auth_method    = "nomad-workloads"
+EOF
+    )
+  else
+    consul_stanza=$(
+      cat <<EOF
+
+  service_identity {
+    aud = ["consul.service.consul"]
+    ttl = "1h"
+  }
+
+  task_identity {
+    aud = ["consul.service.consul"]
+    ttl = "1h"
+  }
+EOF
+    )
+  fi
+
   local vault_stanza=""
 
   if [[ "$server" == "true" ]]; then
@@ -481,6 +508,14 @@ telemetry {
   collection_interval        = "1s"
 }
 
+vault {
+  enabled          = true
+  ca_path          = "$vault_ca_file_path"
+  cert_file        = "$vault_cert_file_path"
+  key_file         = "$vault_key_file_path"
+$vault_stanza
+}
+
 consul {
   address      = "[::1]:8501"
 
@@ -490,15 +525,9 @@ consul {
   cert_file    = "$consul_cert_file_path"
   key_file     = "$consul_key_file_path"
   token        = "$consul_acl_token"
+$consul_stanza
 }
 
-vault {
-  enabled          = true
-  ca_path          = "$vault_ca_file_path"
-  cert_file        = "$vault_cert_file_path"
-  key_file         = "$vault_key_file_path"
-$vault_stanza
-}
 EOF
   chown "$user:$user" "$config_path"
 }
