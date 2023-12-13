@@ -299,11 +299,10 @@ function generate_nomad_config() {
   local -r vault_ca_file_path="${14}"
   local -r vault_cert_file_path="${15}"
   local -r vault_key_file_path="${16}"
-  local -r vault_token="${17}"
-  local -r verify_server_hostname="${18}"
-  local -r verify_https_client="${19}"
-  local -r ipv6="${20}"
-  local -r interface="${21}"
+  local -r verify_server_hostname="${17}"
+  local -r verify_https_client="${18}"
+  local -r ipv6="${19}"
+  local -r interface="${20}"
 
   local -r config_path="$config_dir/$NOMAD_CONFIG_FILE"
 
@@ -391,6 +390,27 @@ client {
   }
 }
 
+plugin "exec" {
+  config {
+    allow_caps = [
+      "audit_write",
+      "chown",
+      "dac_override",
+      "fowner",
+      "fsetid",
+      "ipc_lock",
+      "kill",
+      "mknod",
+      "net_bind_service",
+      "setfcap",
+      "setgid",
+      "setpcap",
+      "setuid",
+      "sys_chroot"
+    ]
+  }
+}
+
 plugin "docker" {
   config {
     endpoint = "unix:///run/docker.sock"
@@ -424,14 +444,6 @@ EOF
     consul_stanza=$(
       cat <<EOF
 
-  service_auth_method = "nomad-workloads"
-  task_auth_method    = "nomad-workloads"
-EOF
-    )
-  else
-    consul_stanza=$(
-      cat <<EOF
-
   service_identity {
     aud = ["consul.service.consul"]
     ttl = "1h"
@@ -443,6 +455,14 @@ EOF
   }
 EOF
     )
+  else
+    consul_stanza=$(
+      cat <<EOF
+
+  service_auth_method = "nomad-workloads"
+  task_auth_method    = "nomad-workloads"
+EOF
+    )
   fi
 
   local vault_stanza=""
@@ -450,15 +470,20 @@ EOF
   if [[ "$server" == "true" ]]; then
     vault_stanza=$(
       cat <<EOF
-  address          = "https://[::1]:8200"
-  token            = "$vault_token"
-  create_from_role = "nomad-cluster"
+  address = "https://[::1]:8200"
+  default_identity {
+    aud = ["vault.service.consul"]
+    ttl = "1h"
+  }
 EOF
     )
   else
+    # create_from_role      = "nomad-cluster"
+    # jwt_auth_backend_path = "jwt-nomad"
+
     vault_stanza=$(
       cat <<EOF
-  address          = "https://vault.service.consul:8200"
+  address               = "https://vault.service.consul:8200"
 EOF
     )
   fi
@@ -893,7 +918,6 @@ function run() {
   local vault_ca_file_path=""
   local vault_cert_file_path=""
   local vault_key_file_path=""
-  local vault_token=""
 
   local type
 
@@ -911,12 +935,6 @@ function run() {
 
   local consul_acl_token=""
   consul_acl_token="$(get_object_value "${secrets_bucket_name}" "${role}/nomad/consul-acl-token-nomad-${type}")"
-
-  local vault_token=""
-
-  if [[ "$role" == "server" ]]; then
-    vault_token="$(get_object_value "${secrets_bucket_name}" "${role}/nomad/vault-token-nomad-server")"
-  fi
 
   local tls_path
   local tls_ca_path
@@ -1000,7 +1018,6 @@ function run() {
     "$vault_ca_file_path" \
     "$vault_cert_file_path" \
     "$vault_key_file_path" \
-    "$vault_token" \
     "$verify_server_hostname" \
     "$verify_https_client" \
     "$ipv6" \

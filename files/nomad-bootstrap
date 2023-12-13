@@ -15,7 +15,6 @@ readonly NOMAD_CA_FILE="/opt/nomad/tls/ca/nomad-ca.pem"
 readonly NOMAD_CERT_FILE="/opt/nomad/tls/nomad-server.pem"
 readonly NOMAD_KEY_FILE="/opt/nomad/tls/nomad-server-key.pem"
 readonly NOMAD_KEYSTORE="/opt/nomad/data/server/keystore"
-readonly CONSUL_CA_FILE="/opt/nomad/tls/ca/nomad-ca.pem"
 
 export CONSUL_HTTP_ADDR="http://[::1]:8500"
 
@@ -123,7 +122,7 @@ function consul_setup() {
 EOF
   )
 
-  consul_config="$(jq -n --arg jwks_ca_cert "$(cat "${CONSUL_CA_FILE}" | sed 's/\\n/\\\\n/g')" "${consul_config}")"
+  consul_config="$(jq -n --arg jwks_ca_cert "$(cat "${NOMAD_CA_FILE}" | sed 's/\\n/\\\\n/g')" "${consul_config}")"
 
   if ! has_consul_acl_auth_method "nomad-workloads"; then
     echo "${consul_config}" | consul acl auth-method create \
@@ -148,6 +147,96 @@ EOF
       -bind-type role \
       -bind-name 'nomad-tasks-${value.nomad_namespace}' \
       -selector '"nomad_service" not in value'
+  fi
+}
+
+function vault_policy_exists() {
+  local name="${1}"
+
+  local value
+  value="$(vault policy list -format=json | jq -r ". | any(. == \"${name}\")")"
+
+  if [[ "${value}" == "true" ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+function has_vault_auth_method() {
+  local name="${1}"
+
+  local value
+  value="$(vault auth list -format=json | jq -r ". | keys | any(. == \"${name}/\")")"
+
+  if [[ "${value}" == "true" ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+function vault_setup() {
+  local vault_token
+  vault_token="$(get_object_value "server/nomad/vault-token-nomad-bootstrap")"
+  export VAULT_TOKEN="${vault_token}"
+
+  local jwt_nomad_config
+  local jwt_nomad_role
+
+  jwt_nomad_config=$(
+    cat <<EOF
+{
+  "jwks_url": "https://nomad.service.consul:4646/.well-known/jwks.json",
+  "jwks_ca_pem": \$jwks_ca_cert,
+  "jwt_supported_algs": ["RS256", "EdDSA"],
+  "default_role": "nomad-workloads"
+}
+EOF
+  )
+
+  jwt_nomad_config="$(jq -n --arg jwks_ca_cert "$(cat "${NOMAD_CA_FILE}" | sed 's/\\n/\\\\n/g')" "${jwt_nomad_config}")"
+
+  jwt_nomad_role=$(
+    cat <<EOF
+{
+  "role_type": "jwt",
+  "bound_audiences": ["vault.service.consul"],
+  "user_claim": "/nomad_job_id",
+  "user_claim_json_pointer": true,
+  "claim_mappings": {
+    "nomad_group": "nomad_group",
+    "nomad_job_id": "nomad_job_id",
+    "nomad_namespace": "nomad_namespace",
+    "nomad_task": "nomad_task"
+  },
+  "token_type": "service",
+  "token_policies": ["nomad-workloads"],
+  "token_period": "60m",
+  "token_explicit_max_ttl": 0
+}
+EOF
+  )
+
+  if ! has_vault_auth_method "jwt-nomad"; then
+    vault auth enable -path 'jwt-nomad' 'jwt'
+    echo "${jwt_nomad_config}" | vault write auth/jwt-nomad/config -
+  fi
+
+  if ! vault read auth/jwt-nomad/role/nomad-workloads &>/dev/null; then
+    echo "${jwt_nomad_role}" | vault write auth/jwt-nomad/role/nomad-workloads -
+  fi
+
+  if ! vault_policy_exists "nomad-workloads"; then
+    echo here
+
+    local accessor
+    accessor="$(vault auth list -format=json | jq -r '."jwt-nomad/".accessor')"
+
+    local policy
+    policy="$(get_object_value "server/nomad/vault-policy-nomad-workloads.hcl" | sed "s/AUTH_METHOD_ACCESSOR/${accessor}/g")"
+
+    echo "${policy}" | vault policy write "nomad-workloads" -
   fi
 }
 
@@ -183,12 +272,13 @@ function configure() {
   keystore
   policy_apply "operator"
   policy_apply "lambda-nomad-drain"
-
   log_info "Policies applied."
 
   consul_setup
-
   log_info "Consul integration applied."
+
+  vault_setup
+  log_info "Vault integration applied."
 }
 
 # TODO: fix the risks in this function
