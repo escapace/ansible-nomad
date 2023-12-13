@@ -99,7 +99,7 @@ function consul_setup() {
   # https://developer.hashicorp.com/nomad/tutorials/integrate-consul/consul-acl
 
   local consul_token
-  consul_token="$(get_object_value "server/consul/consul-acl-token-consul-initial-management")"
+  consul_token="$(get_object_value "server/nomad/consul-acl-token-nomad-bootstrap")"
 
   export CONSUL_HTTP_TOKEN="${consul_token}"
 
