@@ -130,7 +130,7 @@ EOF
       -type jwt \
       -description "JWT auth method for Nomad services and workloads" \
       -format json \
-      -config -
+      -config - &>/dev/null
   fi
 
   if ! has_consul_acl_binding_rule "nomad-workloads"; then
@@ -139,14 +139,14 @@ EOF
       -description "Binding rule for services registered from Nomad" \
       -bind-type service \
       -bind-name '${value.nomad_service}' \
-      -selector '"nomad_service" in value'
+      -selector '"nomad_service" in value' &>/dev/null
 
     consul acl binding-rule create \
       -method 'nomad-workloads' \
       -description "Binding rule for Nomad tasks" \
       -bind-type role \
       -bind-name 'nomad-tasks-${value.nomad_namespace}' \
-      -selector '"nomad_service" not in value'
+      -selector '"nomad_service" not in value' &>/dev/null
   fi
 }
 
@@ -228,8 +228,6 @@ EOF
   fi
 
   if ! vault_policy_exists "nomad-workloads"; then
-    echo here
-
     local accessor
     accessor="$(vault auth list -format=json | jq -r '."jwt-nomad/".accessor')"
 
@@ -304,7 +302,7 @@ function nomad_bootstrap() {
 
   if ! nomad status &>/dev/null; then
     if is_leader; then
-      echo "${token}" | nomad acl bootstrap -
+      echo "${token}" | nomad acl bootstrap - &>/dev/null
       configure
     else
       log_info "Not the leader."
