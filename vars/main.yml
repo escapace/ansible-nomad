@@ -1,5 +1,4 @@
 ---
-
 nomad_dir: /opt/nomad
 nomad_bin_dir: "{{ nomad_dir }}/bin"
 

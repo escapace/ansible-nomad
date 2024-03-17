@@ -1,5 +1,4 @@
 ---
-
 # https://github.com/hashicorp/nomad
 nomad_version: 1.7.1
 nomad_server: false
