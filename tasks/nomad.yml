@@ -1,5 +1,4 @@
 ---
-
 - name: install dependencies
   ansible.builtin.dnf:
     name: "{{ packages }}"
@@ -38,7 +37,7 @@
     group: nomad
     path: "{{ item }}"
     state: directory
-    mode: 0755
+    mode: "0755"
   with_items:
     - "{{ nomad_dir }}"
     - "{{ nomad_bin_dir }}"
@@ -49,7 +48,7 @@
     group: nomad
     path: "{{ item }}"
     state: directory
-    mode: 0750
+    mode: "0750"
   with_items:
     - "{{ nomad_dir }}/data"
     - "{{ nomad_dir }}/config"
@@ -70,14 +69,14 @@
     - name: download nomad
       ansible.builtin.get_url:
         url: "{{ nomad_zip_url }}"
-        dest: "/tmp/{{ nomad_archive }}"
-        checksum: "sha256:{{ nomad_checksum_file_url }}"
-        mode: '0660'
+        dest: /tmp/{{ nomad_archive }}
+        checksum: sha256:{{ nomad_checksum_file_url }}
+        mode: "0660"
       changed_when: false
 
     - name: extract nomad
       ansible.builtin.unarchive:
-        src: "/tmp/{{ nomad_archive }}"
+        src: /tmp/{{ nomad_archive }}
         dest: "{{ nomad_bin_dir }}"
         remote_src: true
       changed_when: false
@@ -87,7 +86,7 @@
         path: "{{ nomad_bin_dir }}/nomad"
         owner: nomad
         group: nomad
-        mode: 0755
+        mode: "0755"
         setype: bin_t
         seuser: system_u
 
@@ -97,7 +96,7 @@
         dest: "{{ nomad_dir }}/version"
         owner: root
         group: root
-        mode: '0644'
+        mode: "0644"
 
 - name: create a nomad symbolic link
   ansible.builtin.file:
@@ -105,14 +104,14 @@
     dest: /usr/bin/nomad
     owner: nomad
     group: nomad
-    mode: 0755
+    mode: "0755"
     state: link
 
 - name: copy run-nomad script
   ansible.builtin.copy:
     src: files/run-nomad
     dest: "{{ nomad_bin_dir }}/run-nomad"
-    mode: 0770
+    mode: "0770"
     owner: nomad
     group: nomad
   tags:
@@ -124,12 +123,12 @@
     owner: root
     group: root
     state: directory
-    mode: 0755
+    mode: "0755"
 
 - name: cleanup
   ansible.builtin.file:
-    path: "/tmp/{{ nomad_archive }}"
-    state: "absent"
+    path: /tmp/{{ nomad_archive }}
+    state: absent
   changed_when: false
 
 - ansible.builtin.include_tasks: storage-setup.yml
@@ -139,7 +138,7 @@
   ansible.builtin.copy:
     src: nomad-online
     dest: /opt/nomad/bin/nomad-online
-    mode: 0750
+    mode: "0750"
     owner: nomad
     group: nomad
 
@@ -149,7 +148,7 @@
     dest: /usr/lib/systemd/system/nomad-online.service
     owner: root
     group: root
-    mode: 0644
+    mode: "0644"
   notify:
     - nomad daemon-reload
 
@@ -159,7 +158,7 @@
     dest: /usr/lib/systemd/system/nomad-online.target
     owner: root
     group: root
-    mode: 0644
+    mode: "0644"
   notify:
     - nomad daemon-reload
 

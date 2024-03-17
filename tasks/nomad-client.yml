@@ -1,10 +1,9 @@
 ---
-
 - name: set br_netfilter module configuration
   ansible.builtin.copy:
-    content: "br_netfilter"
-    dest: "/etc/modules-load.d/br_netfilter.conf"
-    mode: 0644
+    content: br_netfilter
+    dest: /etc/modules-load.d/br_netfilter.conf
+    mode: "0644"
     owner: root
     group: root
   tags:
@@ -45,7 +44,7 @@
   ansible.builtin.copy:
     src: files/run-nomad-network
     dest: "{{ nomad_bin_dir }}/run-nomad-network"
-    mode: 0755
+    mode: "0755"
     owner: root
     group: root
   tags:

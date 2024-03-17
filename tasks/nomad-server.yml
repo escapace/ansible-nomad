@@ -1,10 +1,9 @@
 ---
-
 - name: copy nomad-bootstrap script
   ansible.builtin.copy:
     src: nomad-bootstrap
     dest: /opt/nomad/bin/nomad-bootstrap
-    mode: 0750
+    mode: "0750"
     owner: nomad
     group: nomad
   tags:
@@ -16,7 +15,7 @@
     dest: /usr/lib/systemd/system/nomad-bootstrap.service
     owner: root
     group: root
-    mode: 0644
+    mode: "0644"
   notify:
     - nomad daemon-reload
 
@@ -24,13 +23,13 @@
   ansible.builtin.file:
     path: /etc/systemd/system/nomad-bootstrap.service.d
     state: directory
-    mode: 0755
+    mode: "0755"
 
 - name: copy nomad-snapshot script
   ansible.builtin.copy:
     src: nomad-snapshot
     dest: /opt/nomad/bin/nomad-snapshot
-    mode: 0750
+    mode: "0750"
     owner: nomad
     group: nomad
   tags:
@@ -42,7 +41,7 @@
     dest: /usr/lib/systemd/system/nomad-snapshot.service
     owner: root
     group: root
-    mode: 0644
+    mode: "0644"
   notify:
     - nomad daemon-reload
 
@@ -50,4 +49,4 @@
   ansible.builtin.file:
     path: /etc/systemd/system/nomad-snapshot.service.d
     state: directory
-    mode: 0755
+    mode: "0755"

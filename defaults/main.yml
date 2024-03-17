@@ -1,18 +1,18 @@
 ---
 
 # https://github.com/hashicorp/nomad
-nomad_version: "1.7.1"
+nomad_version: 1.7.1
 nomad_server: false
 nomad_volume: true
 nomad_volume_size: 45%VG
 nomad_volume_name: nomad
-nomad_volume_fs_type: "xfs"
+nomad_volume_fs_type: xfs
 nomad_volume_mount: /opt/nomad/data
 
 nomad_client_tunables:
   - { name: net.bridge.bridge-nf-call-arptables, value: 1 }
   - { name: net.bridge.bridge-nf-call-ip6tables, value: 1 }
   - { name: net.bridge.bridge-nf-call-iptables, value: 1 }
-  - { name: net.ipv4.ip_local_port_range, value: "49152 65535" }
+  - { name: net.ipv4.ip_local_port_range, value: 49152 65535 }
 
 nomad_role_debug: false
