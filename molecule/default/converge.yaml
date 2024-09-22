@@ -6,4 +6,4 @@
     kresd_role_debug: true
     ferm_role_debug: true
   roles:
-    - role: escapace.nomad
+    - role: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
