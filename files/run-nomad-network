@@ -103,7 +103,7 @@ function get_prefix_cidr() {
 function configure_vpc() {
   local -r primary_interface="${1}"
   local -r interface="${2}"
-  local -r kresd_directory_path="/etc/knot-resolver/kresd.conf.d"
+  local -r kresd_directory_path="/etc/knot-resolver/config.d"
   local -r ferm_directory_path="/etc/ferm/ferm.d"
   local -r template_path="/opt/cni/config/vpc.conflist"
   local -r resolv_conf_path="/opt/cni/run/vpc-resolv.conf"
@@ -305,7 +305,7 @@ EOF
   fi
 
   if [[ -d "${kresd_directory_path}" ]]; then
-    local -r kresd_view_interface_conf_path="${kresd_directory_path}/920-view-${interface}.conf"
+    local -r kresd_view_interface_conf_path="${kresd_directory_path}/920-view-${interface}.lua"
 
     local -r kresd_view_interface_conf=$(
       cat <<EOF
@@ -328,7 +328,7 @@ function configure_nomad() {
 
   local -r interface="${1}"
   local -r docker_drop_in_directory_path="/etc/systemd/system/docker.service.d"
-  local -r kresd_directory_path="/etc/knot-resolver/kresd.conf.d"
+  local -r kresd_directory_path="/etc/knot-resolver/config.d"
   local -r ferm_directory_path="/etc/ferm/ferm.d"
 
   local ipv4_address
@@ -356,8 +356,8 @@ EOF
   fi
 
   if [[ -d "${kresd_directory_path}" ]]; then
-    local -r kresd_network_interface_conf_path="${kresd_directory_path}/410-network-${interface}.conf"
-    local -r kresd_view_nomad_conf_path="${kresd_directory_path}/920-view-${interface}.conf"
+    local -r kresd_network_interface_conf_path="${kresd_directory_path}/410-network-${interface}.lua"
+    local -r kresd_view_nomad_conf_path="${kresd_directory_path}/920-view-${interface}.lua"
 
     local -r kresd_network_interface_conf=$(
       cat <<EOF
@@ -508,8 +508,8 @@ function restart_services() {
 
   local services=()
 
-  if systemctl is-active 'kresd@*' &>/dev/null; then
-    services+=("kresd@*")
+  if systemctl is-active knot-resolver &>/dev/null; then
+    services+=("knot-resolver")
   fi
 
   if systemctl is-active ferm.service &>/dev/null; then
@@ -637,7 +637,7 @@ run "$@"
 #   echo "${!variable_reference}"
 # }
 
-#     local -r kresd_network_interface_conf_path="${kresd_directory_path}/410-network-${interface}.conf"
+#     local -r kresd_network_interface_conf_path="${kresd_directory_path}/410-network-${interface}."
 #     local -r kresd_network_interface_conf=$(
 #       cat << EOF
 # net.listen('${ipv4_address}', 53, { kind = 'dns', freebind = true })
