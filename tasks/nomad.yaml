@@ -1,7 +1,7 @@
 ---
 - name: install dependencies
   ansible.builtin.dnf:
-    name: '{{ packages }}'
+    name: "{{ packages }}"
     state: present
     allowerasing: true
   vars:
@@ -27,38 +27,38 @@
 
 - name: packages
   ansible.builtin.package:
-    name: '{{ item }}'
+    name: "{{ item }}"
     state: present
-  with_items: '{{ nomad_packages }}'
+  with_items: "{{ nomad_packages }}"
 
 - name: create nomad directories
   ansible.builtin.file:
     owner: nomad
     group: nomad
-    path: '{{ item }}'
+    path: "{{ item }}"
     state: directory
-    mode: '0755'
+    mode: "0755"
   with_items:
-    - '{{ nomad_dir }}'
-    - '{{ nomad_bin_dir }}'
+    - "{{ nomad_dir }}"
+    - "{{ nomad_bin_dir }}"
 
 - name: create nomad directories
   ansible.builtin.file:
     owner: nomad
     group: nomad
-    path: '{{ item }}'
+    path: "{{ item }}"
     state: directory
-    mode: '0750'
+    mode: "0750"
   with_items:
-    - '{{ nomad_dir }}/data'
-    - '{{ nomad_dir }}/config'
-    - '{{ nomad_dir }}/tls'
-    - '{{ nomad_dir }}/tls/ca'
-    - '{{ nomad_dir }}/plugins'
+    - "{{ nomad_dir }}/data"
+    - "{{ nomad_dir }}/config"
+    - "{{ nomad_dir }}/tls"
+    - "{{ nomad_dir }}/tls/ca"
+    - "{{ nomad_dir }}/plugins"
 
 - name: check nomad version
   ansible.builtin.slurp:
-    src: '{{ nomad_dir }}/version'
+    src: "{{ nomad_dir }}/version"
   register: nomad_current_version
   changed_when: false
   ignore_errors: true
@@ -68,50 +68,50 @@
   block:
     - name: download nomad
       ansible.builtin.get_url:
-        url: '{{ nomad_zip_url }}'
+        url: "{{ nomad_zip_url }}"
         dest: /tmp/{{ nomad_archive }}
         checksum: sha256:{{ nomad_checksum_file_url }}
-        mode: '0660'
+        mode: "0660"
       changed_when: false
 
     - name: extract nomad
       ansible.builtin.unarchive:
         src: /tmp/{{ nomad_archive }}
-        dest: '{{ nomad_bin_dir }}'
+        dest: "{{ nomad_bin_dir }}"
         remote_src: true
       changed_when: false
 
     - name: chcon nomad binary
       ansible.builtin.file:
-        path: '{{ nomad_bin_dir }}/nomad'
+        path: "{{ nomad_bin_dir }}/nomad"
         owner: nomad
         group: nomad
-        mode: '0755'
+        mode: "0755"
         setype: bin_t
         seuser: system_u
 
     - name: write version
       ansible.builtin.copy:
-        content: '{{ nomad_archive }}'
-        dest: '{{ nomad_dir }}/version'
+        content: "{{ nomad_archive }}"
+        dest: "{{ nomad_dir }}/version"
         owner: root
         group: root
-        mode: '0644'
+        mode: "0644"
 
 - name: create a nomad symbolic link
   ansible.builtin.file:
-    src: '{{ nomad_bin_dir }}/nomad'
+    src: "{{ nomad_bin_dir }}/nomad"
     dest: /usr/bin/nomad
     owner: nomad
     group: nomad
-    mode: '0755'
+    mode: "0755"
     state: link
 
 - name: copy run-nomad script
   ansible.builtin.copy:
     src: files/run-nomad
-    dest: '{{ nomad_bin_dir }}/run-nomad'
-    mode: '0770'
+    dest: "{{ nomad_bin_dir }}/run-nomad"
+    mode: "0770"
     owner: nomad
     group: nomad
   tags:
@@ -123,7 +123,7 @@
     owner: root
     group: root
     state: directory
-    mode: '0755'
+    mode: "0755"
 
 - name: cleanup
   ansible.builtin.file:
@@ -138,7 +138,7 @@
   ansible.builtin.copy:
     src: nomad-online
     dest: /opt/nomad/bin/nomad-online
-    mode: '0750'
+    mode: "0750"
     owner: nomad
     group: nomad
 
@@ -148,7 +148,7 @@
     dest: /usr/lib/systemd/system/nomad-online.service
     owner: root
     group: root
-    mode: '0644'
+    mode: "0644"
   notify:
     - nomad daemon-reload
 
@@ -158,7 +158,7 @@
     dest: /usr/lib/systemd/system/nomad-online.target
     owner: root
     group: root
-    mode: '0644'
+    mode: "0644"
   notify:
     - nomad daemon-reload
 
